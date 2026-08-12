@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────
+# Go
+# ─────────────────────────────────────────────
+
+# Build output
+/bin/
+/dist/
+/build/
+
+# Go coverage / profiling
+*.out
+*.prof
+coverage.html
+coverage.xml
+
+# Go workspace
+go.work
+go.work.sum
+
+# ─────────────────────────────────────────────
+# ASDL Hub runtime / local development
+# ─────────────────────────────────────────────
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local credentials / keys
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Local WireGuard configs
+*.conf
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+data/
+tmp/
+.cache/
+
+# ─────────────────────────────────────────────
+# Node / Next.js
+# ─────────────────────────────────────────────
+
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
+# Next.js generated files
+dashboard/next-env.d.ts
+
+# npm debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─────────────────────────────────────────────
+# OS / editors
+# ─────────────────────────────────────────────
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
