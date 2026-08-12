@@ -76,13 +76,19 @@ detect_os() {
                 || echo "$USER" \
                 || whoami)
             ;;
-        darwin)
-            SSH_USER=$(logname 2>/dev/null \
-                || stat -f '%Su' /dev/console 2>/dev/null \
-                || echo "$SUDO_USER" \
-                || echo "$USER" \
-                || whoami)
-            ;;
+      darwin)
+    if SSH_USER=$(logname 2>/dev/null) && [ -n "$SSH_USER" ]; then
+        :
+    elif SSH_USER=$(stat -f '%%Su' /dev/console 2>/dev/null) && [ -n "$SSH_USER" ]; then
+        :
+    elif [ -n "$SUDO_USER" ]; then
+        SSH_USER="$SUDO_USER"
+    elif [ -n "$USER" ]; then
+        SSH_USER="$USER"
+    else
+        SSH_USER=$(whoami)
+    fi
+    ;;
         *)
             echo "❌ Unsupported OS: $OS"
             echo "   Supported: linux, darwin (macOS)"
