@@ -345,33 +345,45 @@ func (s *NodeService) calculateHealthScore(node *models.Node) int {
 }
 
 func (s *NodeService) GetNodeHealth(c *gin.Context) {
-    id := c.Param("id")
-    var node models.Node
-    if err := s.db.First(&node, "id = ?", id).Error; err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
-        return
-    }
+	id := c.Param("id")
 
-    healthScore := s.calculateHealthScore(&node)
+	var node models.Node
+	if err := s.db.First(&node, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
 
-    var healthDetails map[string]interface{}
-    json.Unmarshal([]byte(node.HealthDetails), &healthDetails)
+	healthScore := s.calculateHealthScore(&node)
 
-    c.JSON(http.StatusOK, gin.H{
-        "node_id":        node.ID,
-        "hostname":       node.Hostname,
-        "status":         node.Status,
-        "health_score":   healthScore,
-        "health_details": healthDetails,
-        "online":         node.Online,
-        "last_heartbeat": node.LastHeartbeat,
-        "memory_used":    node.MemoryUsed,
-        "memory_total":   node.MemoryTotal,
-        "memory_percent": float64(node.MemoryUsed) / float64(node.MemoryTotal) * 100,
-        "load_avg":       node.LoadAvg1,
-        "ping_latency":   node.PingLatency,
-        "wifi_signal":    node.WiFiSignal,
-    })
+	var healthDetails map[string]interface{}
+	if node.HealthDetails != "" {
+		if err := json.Unmarshal([]byte(node.HealthDetails), &healthDetails); err != nil {
+			healthDetails = map[string]interface{}{}
+		}
+	} else {
+		healthDetails = map[string]interface{}{}
+	}
+
+	var memoryPercent float64
+	if node.MemoryTotal > 0 {
+		memoryPercent = float64(node.MemoryUsed) / float64(node.MemoryTotal) * 100
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"node_id":        node.ID,
+		"hostname":       node.Hostname,
+		"status":         node.Status,
+		"health_score":   healthScore,
+		"health_details": healthDetails,
+		"online":         node.Online,
+		"last_heartbeat": node.LastHeartbeat,
+		"memory_used":    node.MemoryUsed,
+		"memory_total":   node.MemoryTotal,
+		"memory_percent": memoryPercent,
+		"load_avg":       node.LoadAvg1,
+		"ping_latency":   node.PingLatency,
+		"wifi_signal":    node.WiFiSignal,
+	})
 }
 
 func (s *NodeService) CheckAllNodesHealth(c *gin.Context) {
