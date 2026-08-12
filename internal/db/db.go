@@ -68,11 +68,11 @@ func createDefaultAdmin(db *gorm.DB) {
 		}
 
 		admin := models.User{
-			ID:        "admin",
-			Username:  "admin",
-			Email:     "admin@asdlhub.com",
-			Password:  string(hashed),
-			Role:      "admin",
+			ID:       "admin",
+			Username: "admin",
+			Email:    "admin@asdlhub.com",
+			Password: string(hashed),
+			Role:     "admin",
 		}
 
 		if err := db.Create(&admin).Error; err != nil {

@@ -21,21 +21,21 @@ import (
 )
 
 type EnrollmentService struct {
-    db            *gorm.DB
-    wireGuard     *WireGuardService
-    encryptionKey []byte
-    hubPort       int
+	db            *gorm.DB
+	wireGuard     *WireGuardService
+	encryptionKey []byte
+	hubPort       int
 }
 
 func NewEnrollmentService(db *gorm.DB, wg *WireGuardService, jwtSecret string, hubPort int) *EnrollmentService {
-    key := make([]byte, 32)
-    copy(key, []byte(jwtSecret))
-    return &EnrollmentService{
-        db:            db,
-        wireGuard:     wg,
-        encryptionKey: key,
-        hubPort:       hubPort,
-    }
+	key := make([]byte, 32)
+	copy(key, []byte(jwtSecret))
+	return &EnrollmentService{
+		db:            db,
+		wireGuard:     wg,
+		encryptionKey: key,
+		hubPort:       hubPort,
+	}
 }
 
 // CreateToken generates a new enrollment token
@@ -158,8 +158,8 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		HubWireGuardPubKey:   WireGuardHubPubKey,
 		HubWireGuardEndpoint: WireGuardHubEndpoint,
 		SSHPublicKey:         pubAuth, // agent adds this to authorized_keys
-		HubVPNIP: WireGuardHubIP,
-    	HubPort:  s.hubPort, 
+		HubVPNIP:             WireGuardHubIP,
+		HubPort:              s.hubPort,
 	}, nil
 }
 

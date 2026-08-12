@@ -14,8 +14,8 @@ import (
 )
 
 type TerminalService struct {
-	db             *gorm.DB
-	enrollmentSvc  *EnrollmentService
+	db            *gorm.DB
+	enrollmentSvc *EnrollmentService
 }
 
 func NewTerminalService(db *gorm.DB, enrollmentSvc *EnrollmentService) *TerminalService {
