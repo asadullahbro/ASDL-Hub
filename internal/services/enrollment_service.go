@@ -160,7 +160,7 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		SSHPublicKey:         pubAuth, // agent adds this to authorized_keys
 		HubVPNIP:             WireGuardHubIP,
 		HubPort:              s.hubPort,
-		WireGuardNetwork:            WireGuardNetwork,
+		WireGuardNetwork:     WireGuardNetwork,
 	}, nil
 }
 
