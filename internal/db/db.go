@@ -34,6 +34,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.EnrollmentToken{},
 		&models.WireGuardPeer{},
 		&models.NodeSSHKey{},
+		&models.Project{},
 	); err != nil {
 		return nil, err
 	}
