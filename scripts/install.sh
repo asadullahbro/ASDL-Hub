@@ -316,7 +316,7 @@ setup_wireguard() {
     command -v wg >/dev/null || die "WireGuard tools are unavailable."
     modprobe wireguard 2>/dev/null || true
 
-    # Check if asdl0 already exists
+    # Reuse existing asdl0 if already up
     if ip link show "$WG_INTERFACE" >/dev/null 2>&1; then
         ok "Reusing existing WireGuard interface: $WG_INTERFACE"
         WG_HUB_PUBKEY="$(wg show "$WG_INTERFACE" public-key)"
@@ -324,17 +324,24 @@ setup_wireguard() {
         return
     fi
 
-    # Check if another asdl* interface exists and reuse it
-    existing="$(ip link show | grep -oP 'asdl[0-9]+' | head -1 || true)"
-    if [[ -n "$existing" ]]; then
-        WG_INTERFACE="$existing"
-        warn "Found existing interface $WG_INTERFACE, reusing it."
-        WG_HUB_PUBKEY="$(wg show "$WG_INTERFACE" public-key)"
-        ok "WireGuard prepared: $WG_INTERFACE / UDP $WG_PORT"
-        return
-    fi
+    # Find a free 10.X.0.0/24 subnet
+    local hub_ip subnet found=0
+    for third in 100 101 102 103 104 105 150 200 201 202; do
+        subnet="10.${third}.0.0/24"
+        hub_ip="10.${third}.0.1"
+        if ! ip route show | grep -q "^10\.${third}\.0\.0"; then
+            found=1
+            break
+        fi
+    done
 
-    # No asdl* interface found — create asdl0
+    [[ "$found" -eq 1 ]] || die "Could not find a free subnet in 10.x.0.0/24 range."
+    ok "Using subnet: $subnet"
+
+    # Update globals for write_env
+    WG_HUB_IP="$hub_ip"
+    WG_NETWORK="$subnet"
+
     WG_PRIVATE_KEY="$(wg genkey)"
     WG_PUBLIC_KEY="$(echo "$WG_PRIVATE_KEY" | wg pubkey)"
 
@@ -342,13 +349,13 @@ setup_wireguard() {
     cat > "/etc/wireguard/${WG_INTERFACE}.conf" <<EOF
 [Interface]
 PrivateKey = $WG_PRIVATE_KEY
-Address = 10.100.0.1/24
+Address = ${hub_ip}/24
 ListenPort = $WG_PORT
 EOF
     chmod 600 "/etc/wireguard/${WG_INTERFACE}.conf"
 
     systemctl enable "wg-quick@${WG_INTERFACE}"
-    systemctl start "wg-quick@${WG_INTERFACE}"
+    systemctl start "wg-quick@${WG_INTERFACE}" || die "Failed to bring up WireGuard interface."
 
     WG_HUB_PUBKEY="$(wg show "$WG_INTERFACE" public-key)"
 
@@ -359,7 +366,7 @@ EOF
         echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
     fi
 
-    ok "WireGuard interface created: $WG_INTERFACE / UDP $WG_PORT"
+    ok "WireGuard interface created: $WG_INTERFACE ($hub_ip) / UDP $WG_PORT"
 }
 
 write_env() {
@@ -380,11 +387,11 @@ PUBLIC_URL=$HUB_URL
 
 WG_INTERFACE=$WG_INTERFACE
 WG_PORT=$WG_PORT
-WG_NETWORK=10.100.0.0/24
-WG_HUB_IP=10.100.0.1
+WG_HUB_IP=$WG_HUB_IP
+WG_NETWORK=$WG_NETWORK
+VPN_NETWORKS=$WG_NETWORK,127.0.0.0/8,::1/128
 WG_HUB_PUBKEY=$WG_HUB_PUBKEY
 WG_ENDPOINT=$HUB_HOST:$WG_PORT
-VPN_NETWORKS=10.100.0.0/24,127.0.0.0/8,::1/128
 EOF
     chmod 600 "$INSTALL_DIR/.env"
     ok "Configuration written."
