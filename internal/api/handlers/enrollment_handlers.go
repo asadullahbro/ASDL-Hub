@@ -93,3 +93,15 @@ func (h *EnrollmentHandlers) RemovePeer(c *gin.Context) {
 	h.wg.DB().Delete(&peer)
 	c.JSON(http.StatusOK, gin.H{"removed": true})
 }
+func (h *EnrollmentHandlers) Rollback(c *gin.Context) {
+	nodeID := c.Param("node_id")
+	if nodeID == "" {
+		c.JSON(400, gin.H{"error": "node_id required"})
+		return
+	}
+	if err := h.enrollment.Rollback(nodeID); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}

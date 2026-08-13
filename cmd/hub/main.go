@@ -64,6 +64,56 @@ echo ""
 echo "   Hub:  $HUB_URL"
 echo "   Slug: $HUB_SLUG"
 echo ""
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Rollback on failure
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ROLLBACK_DONE=0
+rollback() {
+    [ "$ROLLBACK_DONE" -eq 1 ] && return
+    ROLLBACK_DONE=1
+
+    echo ""
+    echo "❌ Installation failed — rolling back..."
+
+    # Tell the hub to clean up if we got far enough to enroll
+    if [ -n "${NODE_ID:-}" ] && [ "$NODE_ID" != "null" ]; then
+        echo "   Notifying hub to remove node record..."
+        curl -fsSL -X DELETE "${HUB_URL}/api/v1/enrollment/rollback/${NODE_ID}" \
+            2>/dev/null || true
+    fi
+
+    case "$OS" in
+        linux)
+            systemctl stop "$AGENT_SERVICE" 2>/dev/null || true
+            systemctl disable "$AGENT_SERVICE" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${AGENT_SERVICE}.service"
+            systemctl daemon-reload 2>/dev/null || true
+
+            systemctl stop "wg-quick@${WG_IFACE}" 2>/dev/null || true
+            systemctl disable "wg-quick@${WG_IFACE}" 2>/dev/null || true
+            wg-quick down "${WG_IFACE}" 2>/dev/null || true
+            rm -f "/etc/wireguard/${WG_IFACE}.conf"
+
+            rm -f "$AGENT_BIN"
+            rm -rf "/etc/asdl/${HUB_SLUG}"
+            ;;
+        darwin)
+            PLIST_LABEL="website.asdl.agent.${HUB_SLUG}"
+            PLIST_PATH="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
+            sudo launchctl bootout "system/${PLIST_LABEL}" 2>/dev/null || true
+            sudo rm -f "$PLIST_PATH"
+
+            sudo wg-quick down "/usr/local/etc/wireguard/${WG_IFACE}.conf" 2>/dev/null || true
+            sudo rm -f "/usr/local/etc/wireguard/${WG_IFACE}.conf"
+
+            sudo rm -f "$AGENT_BIN"
+            sudo rm -rf "/usr/local/etc/asdl/${HUB_SLUG}"
+            ;;
+    esac
+
+    echo "↩️  Rollback complete. Nothing was left behind."
+    echo ""
+}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 1: Detect OS
@@ -557,6 +607,8 @@ write_wireguard_config
 start_wireguard
 start_service
 
+ROLLBACK_DONE=1
+
 echo ""
 echo "╔══════════════════════════════════════╗"
 echo "║         Enrollment Complete! ✅       ║"
@@ -693,7 +745,8 @@ func main() {
 	public := router.Group("/api/v1")
 	{
 		// Public — agent calls this during enrollment
-		public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
+	public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
+	public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
 
 		// Install script
 		router.GET("/install", func(c *gin.Context) {

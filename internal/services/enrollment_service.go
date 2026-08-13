@@ -231,6 +231,26 @@ func (s *EnrollmentService) Decrypt(ciphertext string) (string, error) {
 	return string(plain), nil
 }
 
+func (s *EnrollmentService) Rollback(nodeID string) error {
+	// Get the peer public key before deleting
+	var peer models.WireGuardPeer
+	if err := s.db.Where("node_id = ?", nodeID).First(&peer).Error; err == nil {
+		// Remove from WireGuard
+		s.wireGuard.RemovePeer(peer.PublicKey)
+		// Delete peer record
+		s.db.Delete(&peer)
+	}
+
+	// Delete SSH keys
+	s.db.Delete(&models.NodeSSHKey{}, "node_id = ?", nodeID)
+
+	// Delete node
+	s.db.Delete(&models.Node{}, "id = ?", nodeID)
+
+	log.Printf("↩️  Enrollment rolled back for node: %s", nodeID)
+	return nil
+}
+
 // helpers for RSA key generation
 func generateRSAKey() (*rsa.PrivateKey, error) {
 	return rsa.GenerateKey(rand.Reader, 4096)
