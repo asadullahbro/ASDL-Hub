@@ -77,7 +77,7 @@ func (s *WireGuardService) AllocateIP() (string, error) {
 
 // AddPeer calls `wg set` to add a new peer live, then persists to config
 func (s *WireGuardService) AddPeer(publicKey, assignedIP string) error {
-	cmd := exec.Command("sudo", "wg", "set", WireGuardInterface,
+	cmd := exec.Command("wg", "set", WireGuardInterface,
 		"peer", publicKey,
 		"allowed-ips", assignedIP+"/32",
 	)
@@ -85,7 +85,7 @@ func (s *WireGuardService) AddPeer(publicKey, assignedIP string) error {
 		return fmt.Errorf("wg set failed: %v — %s", err, string(out))
 	}
 
-	saveCmd := exec.Command("sudo", "wg-quick", "save", WireGuardInterface)
+	saveCmd := exec.Command("wg-quick", "save", WireGuardInterface)
 	if out, err := saveCmd.CombinedOutput(); err != nil {
 		log.Printf("⚠️ wg-quick save failed: %v — %s", err, string(out))
 	}
@@ -96,14 +96,14 @@ func (s *WireGuardService) AddPeer(publicKey, assignedIP string) error {
 
 // RemovePeer removes a peer from WireGuard
 func (s *WireGuardService) RemovePeer(publicKey string) error {
-	cmd := exec.Command("sudo", "wg", "set", WireGuardInterface,
+	cmd := exec.Command("wg", "set", WireGuardInterface,
 		"peer", publicKey, "remove",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("wg peer remove failed: %v — %s", err, string(out))
 	}
 
-	saveCmd := exec.Command("sudo", "wg-quick", "save", WireGuardInterface)
+	saveCmd := exec.Command("wg-quick", "save", WireGuardInterface)
 	saveCmd.Run()
 
 	log.Printf("🗑️ WireGuard peer removed: %s", publicKey[:8]+"...")
@@ -130,7 +130,7 @@ func (s *WireGuardService) GenerateSSHKeypair() (privateKeyPEM string, publicKey
 
 // Status returns current wg show output
 func (s *WireGuardService) Status() (string, error) {
-	cmd := exec.Command("sudo", "wg", "show", WireGuardInterface)
+	cmd := exec.Command("wg", "show", WireGuardInterface)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("wg show failed: %v", err)

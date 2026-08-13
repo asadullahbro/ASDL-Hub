@@ -374,6 +374,8 @@ install_files() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     sleep 1
 
+    setcap cap_net_admin+eip /usr/bin/wg 2>/dev/null || true
+    
     mkdir -p "$INSTALL_DIR/bin"
     rm -f "$INSTALL_DIR/bin/asdl-hub"
     cp "$PROJECT_DIR/bin/asdl-hub" "$INSTALL_DIR/bin/asdl-hub"
@@ -410,10 +412,12 @@ EnvironmentFile=$INSTALL_DIR/.env
 ExecStart=$INSTALL_DIR/bin/asdl-hub
 Restart=always
 RestartSec=5
-NoNewPrivileges=true
+NoNewPrivileges=false
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=false
 ProtectHome=true
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target
