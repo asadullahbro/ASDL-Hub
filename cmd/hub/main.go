@@ -35,16 +35,13 @@ type Config struct {
 }
 
 func generateInstallScript() string {
-	hubDomain := os.Getenv("HUB_DOMAIN")
-	hubPort := os.Getenv("SERVER_PORT")
-
-	var hubURL string
-
-	if hubDomain != "" {
-		hubURL = "https://" + hubDomain
-	} else {
-		// fallback to VPN IP with port
-		hubURL = fmt.Sprintf("http://%s:%s", os.Getenv("WG_HUB_IP"), hubPort)
+	hubURL := os.Getenv("PUBLIC_URL")
+	if hubURL == "" {
+		hubPort := os.Getenv("SERVER_PORT")
+		if hubPort == "" {
+			hubPort = "8080"
+		}
+		hubURL = fmt.Sprintf("http://localhost:%s", hubPort)
 	}
 	script := fmt.Sprintf(`#!/bin/bash
         
