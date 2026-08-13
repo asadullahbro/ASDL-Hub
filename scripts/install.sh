@@ -523,8 +523,12 @@ summary() {
     echo
     echo "  WireGuard:      $WG_INTERFACE / UDP $WG_PORT"
     echo
-    echo "  Logs:"
-    echo "    journalctl -u $SERVICE_NAME -f"
+    warn "If nodes can't connect, ensure UDP $WG_PORT and TCP 80 is open in your cloud firewall:"
+    echo "    → AWS:          EC2 → Security Groups → Inbound Rules"
+    echo "    → GCP:          VPC → Firewall Rules"
+    echo "    → DigitalOcean: Networking → Firewalls"
+    echo "    → Oracle Cloud: Security Lists / NSGs"
+    echo "    → Hetzner:      Firewall in Cloud Console"
     echo
     warn "Keep the generated admin password somewhere safe."
     echo
