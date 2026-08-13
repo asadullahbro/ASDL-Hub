@@ -160,7 +160,7 @@ prepare_source() {
 
     local tmp version
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
+    trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"' EXIT
 
     info "Fetching latest version..."
     version="$(curl -fsSL --max-time 10 \
@@ -222,7 +222,7 @@ configure_endpoint() {
     echo "How should users access this Hub?"
     echo "Leave the domain empty to use the detected public IP."
     echo
-    read -r -p "Domain (optional): " HUB_DOMAIN
+    read -r -p "Domain (optional): " HUB_DOMAIN </dev/tty
 
     if [[ -n "$HUB_DOMAIN" ]]; then
         [[ "$HUB_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] \
@@ -233,7 +233,7 @@ configure_endpoint() {
         ok "Using domain: $HUB_DOMAIN"
     else
         PUBLIC_IP="$(detect_public_ip || true)"
-        [[ -n "${PUBLIC_IP:-}" ]] || read -r -p "Public IP (could not auto-detect): " PUBLIC_IP
+        [[ -n "${PUBLIC_IP:-}" ]] || read -r -p "Public IP (could not auto-detect): " PUBLIC_IP </dev/tty
         [[ "$PUBLIC_IP" =~ ^[0-9.]+$ ]] || die "Invalid public IP."
         HUB_HOST="$PUBLIC_IP"
         HUB_URL="http://$PUBLIC_IP"
