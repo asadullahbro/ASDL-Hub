@@ -247,6 +247,7 @@ enroll_with_hub() {
     SSH_PUBLIC_KEY=$(echo "$RESPONSE" | jq -r '.ssh_public_key')
     HUB_VPN_IP=$(echo "$RESPONSE" | jq -r '.hub_vpn_ip')
     HUB_PORT=$(echo "$RESPONSE" | jq -r '.hub_port')
+	WG_NETWORK=$(echo "$RESPONSE" | jq -r '.wireguard_network // "10.100.0.0/24"')
 
     if [ "$NODE_ID" = "null" ] || [ -z "$NODE_ID" ]; then
         echo "❌ Enrollment failed. Response was:"
@@ -425,7 +426,7 @@ Address = ${ASSIGNED_IP}/24
 [Peer]
 PublicKey = ${HUB_WG_PUBKEY}
 Endpoint = ${HUB_WG_ENDPOINT}
-AllowedIPs = 10.100.0.0/24
+AllowedIPs = ${WG_NETWORK}
 PersistentKeepalive = 25
 EOF
             chmod 600 /etc/wireguard/asdl0.conf
@@ -440,7 +441,7 @@ Address = ${ASSIGNED_IP}/24
 [Peer]
 PublicKey = ${HUB_WG_PUBKEY}
 Endpoint = ${HUB_WG_ENDPOINT}
-AllowedIPs = 10.100.0.0/24
+AllowedIPs = ${WG_NETWORK}
 PersistentKeepalive = 25
 EOF
             sudo chmod 600 /usr/local/etc/wireguard/asdl0.conf
@@ -464,7 +465,7 @@ start_wireguard() {
             ;;
         darwin)
             # Remove any conflicting route before bringing tunnel up
-            sudo route delete -net 10.100.0.0/24 2>/dev/null || true
+            sudo route delete -net ${WG_NETWORK} 2>/dev/null || true
             sudo wg-quick down /usr/local/etc/wireguard/asdl0.conf 2>/dev/null || true
             sudo wg-quick up /usr/local/etc/wireguard/asdl0.conf
             # Verify route was added
@@ -472,7 +473,7 @@ start_wireguard() {
                 echo "⚠️  Route not added by wg-quick, adding manually..."
                 TUNNEL=$(sudo wg show asdl0 2>/dev/null | grep -o 'utun[0-9]*' | head -1)
                 if [ -n "$TUNNEL" ]; then
-                    sudo route add -net 10.100.0.0/24 -interface "$TUNNEL" 2>/dev/null || true
+                    sudo route add -net ${WG_NETWORK} -interface "$TUNNEL" 2>/dev/null || true
                 fi
             fi
             ;;
@@ -480,7 +481,6 @@ start_wireguard() {
 
     echo "✅ WireGuard started — IP: $ASSIGNED_IP"
 }
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 14: Start service
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

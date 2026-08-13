@@ -160,6 +160,7 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		SSHPublicKey:         pubAuth, // agent adds this to authorized_keys
 		HubVPNIP:             WireGuardHubIP,
 		HubPort:              s.hubPort,
+		WireGuardNetwork:            WireGuardNetwork,
 	}, nil
 }
 
@@ -184,6 +185,7 @@ type EnrollResponse struct {
 	SSHPublicKey         string `json:"ssh_public_key"`
 	HubVPNIP             string `json:"hub_vpn_ip"`
 	HubPort              int    `json:"hub_port"`
+	WireGuardNetwork     string `json:"wireguard_network"`
 }
 
 // encrypt encrypts a string using AES-GCM

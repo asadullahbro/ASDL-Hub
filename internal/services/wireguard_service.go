@@ -23,6 +23,7 @@ var (
 	WireGuardHubPubKey   = os.Getenv("WG_HUB_PUBKEY")
 	WireGuardHubEndpoint = os.Getenv("WG_ENDPOINT")
 	WireGuardStartIP     = getEnvOrDefault("WG_START_IP", "10.100.0.2")
+	WireGuardNetwork     = getEnvOrDefault("WG_NETWORK", "10.100.0.0/24")
 )
 
 func getEnvOrDefault(key, def string) string {
