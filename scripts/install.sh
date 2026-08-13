@@ -384,6 +384,11 @@ install_files() {
         cp -a "$PROJECT_DIR/dashboard" "$INSTALL_DIR/dashboard"
     fi
 
+    # Allow hub to manage WireGuard peers without password
+    echo "asdl-hub ALL=(ALL) NOPASSWD: /usr/bin/wg, /usr/sbin/ip" \
+        > /etc/sudoers.d/asdl-hub
+    chmod 440 /etc/sudoers.d/asdl-hub
+
     chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
 }
