@@ -148,47 +148,6 @@ EOF
     fi
 }
 
-# ── Build ───────────────────────────────────────────────────────────────────
-
-build() {
-    info "Building ASDL Hub..."
-
-    local BIN_DIR="$INSTALL_DIR/bin"
-    local BINARY="$BIN_DIR/asdl-hub"
-
-    cd "$PROJECT_DIR"
-    [[ -f go.mod ]] || die "go.mod not found in $PROJECT_DIR"
-
-    mkdir -p "$BIN_DIR"
-
-    info "Downloading Go dependencies..."
-    go mod download
-
-    if [[ -d "$PROJECT_DIR/dashboard" && -f "$PROJECT_DIR/dashboard/package.json" ]]; then
-        info "Building dashboard..."
-        cd "$PROJECT_DIR/dashboard"
-        if [[ -f package-lock.json ]]; then
-            npm ci --silent --no-fund --no-audit
-        else
-            npm install --silent --no-fund --no-audit
-        fi
-        npm run build
-        cd "$PROJECT_DIR"
-    fi
-
-    info "Building Go binary..."
-    if [[ -f "$PROJECT_DIR/cmd/hub/main.go" ]]; then
-        go build -trimpath -ldflags="-s -w" -o "$BINARY" ./cmd/hub
-    elif [[ -f "$PROJECT_DIR/main.go" ]]; then
-        go build -trimpath -ldflags="-s -w" -o "$BINARY" .
-    else
-        die "Could not find Hub entrypoint."
-    fi
-
-    chmod 755 "$BINARY"
-    "$BINARY" --version >/dev/null 2>&1 || true
-    ok "Build complete: $BINARY"
-}
 
 # ── Main functions ───────────────────────────────────────────────────────────
 
@@ -199,22 +158,26 @@ prepare_source() {
         return
     fi
 
-    local repo="${ASDL_HUB_REPO:-}"
-    local ref="${ASDL_HUB_REF:-main}"
-
-    [[ -n "$repo" ]] || die "No ASDL Hub source configured. Set ASDL_HUB_REPO or run from the project directory."
-
-    local tmp
+    local tmp version
     tmp="$(mktemp -d)"
-    info "Downloading ASDL Hub source..."
+    trap 'rm -rf "$tmp"' EXIT
+
+    info "Fetching latest version..."
+    version="$(curl -fsSL --max-time 10 \
+        https://api.github.com/repos/asadullahbro/ASDL-Hub/releases/latest \
+        | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+    [[ -n "$version" ]] || die "Could not determine latest version."
+    ok "Latest version: $version"
+
+    info "Downloading ASDL Hub $version..."
     curl -fL --retry 3 --connect-timeout 10 \
-        "https://github.com/${repo}/archive/refs/heads/${ref}.tar.gz" \
+        "https://github.com/asadullahbro/ASDL-Hub/releases/download/${version}/asdl-hub-${version}-linux-${ARCH}.tar.gz" \
         -o "$tmp/asdl-hub.tar.gz"
 
     tar -xzf "$tmp/asdl-hub.tar.gz" -C "$tmp"
     PROJECT_DIR="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-    [[ -n "$PROJECT_DIR" ]] || die "Downloaded source archive was empty."
-    ok "Source downloaded."
+    [[ -n "$PROJECT_DIR" ]] || die "Downloaded archive was empty."
+    ok "Downloaded ASDL Hub $version."
 }
 
 install_packages() {
@@ -222,10 +185,7 @@ install_packages() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y \
-        ca-certificates curl openssl git \
-        build-essential \
-        golang \
-        nodejs npm \
+        ca-certificates curl openssl \
         postgresql postgresql-contrib \
         nginx \
         wireguard \
@@ -392,13 +352,17 @@ EOF
 }
 
 install_files() {
-    if [[ -d "$PROJECT_DIR/dashboard/.next" ]]; then
+    mkdir -p "$INSTALL_DIR/bin"
+    cp "$PROJECT_DIR/bin/asdl-hub" "$INSTALL_DIR/bin/asdl-hub"
+    chmod 755 "$INSTALL_DIR/bin/asdl-hub"
+
+    if [[ -d "$PROJECT_DIR/dashboard/out" ]]; then
         rm -rf "$INSTALL_DIR/dashboard"
         cp -a "$PROJECT_DIR/dashboard" "$INSTALL_DIR/dashboard"
     fi
+
     chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
-    chmod 755 "$INSTALL_DIR/bin/asdl-hub"
 }
 
 setup_service() {
@@ -487,7 +451,6 @@ main() {
     setup_database
     setup_wireguard
     write_env
-    build
     install_files
     setup_service
     setup_firewall
