@@ -327,13 +327,13 @@ setup_wireguard() {
     # Find a free 10.X.0.0/24 subnet
     local hub_ip subnet found=0
     for third in 100 101 102 103 104 105 150 200 201 202; do
-        subnet="10.${third}.0.0/24"
-        hub_ip="10.${third}.0.1"
-        if ! ip route show | grep -q "^10\.${third}\.0\.0"; then
-            found=1
-            break
-        fi
-    done
+    subnet="10.${third}.0.0/24"
+    hub_ip="10.${third}.0.1"
+    if ! ip addr show | grep -q "10\.${third}\."; then
+        found=1
+        break
+    fi
+done
 
     [[ "$found" -eq 1 ]] || die "Could not find a free subnet in 10.x.0.0/24 range."
     ok "Using subnet: $subnet"
