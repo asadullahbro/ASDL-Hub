@@ -10,7 +10,8 @@ INSTALL_DIR="/opt/asdl-hub"
 SERVICE_NAME="asdl-hub"
 RUN_USER="asdl-hub"
 WG_INTERFACE="asdl0"
-WG_PORT="${ASDL_WG_PORT:-51820}"
+WG_PORT_HINT="${ASDL_WG_PORT:-51820}"
+WG_PORT=""  # set by find_free_port
 HUB_PORT="${ASDL_HUB_PORT:-8080}"
 DOCS_URL="https://docs.asdl.website/asdl-hub"
 
@@ -309,6 +310,16 @@ setup_database() {
 
     ok "PostgreSQL ready."
 }
+find_free_port() {
+    local hint="${1:-51820}"
+    for port in "$hint" 51821 51822 51823 51824 51825; do
+        if ! ss -ulpn | grep -q ":${port} "; then
+            echo "$port"
+            return 0
+        fi
+    done
+    die "Could not find a free UDP port for WireGuard (tried 51820-51825)."
+}
 
 setup_wireguard() {
     info "Preparing WireGuard..."
@@ -319,38 +330,44 @@ setup_wireguard() {
     # Reuse existing asdl0 if already up
     if ip link show "$WG_INTERFACE" >/dev/null 2>&1; then
         ok "Reusing existing WireGuard interface: $WG_INTERFACE"
+        WG_PORT="$(grep -E '^ListenPort' /etc/wireguard/${WG_INTERFACE}.conf | awk '{print $3}')"
+        WG_HUB_IP="$(grep -E '^Address' /etc/wireguard/${WG_INTERFACE}.conf | awk '{print $3}' | cut -d/ -f1)"
+        WG_NETWORK="${WG_HUB_IP%.*}.0/24"
         WG_HUB_PUBKEY="$(wg show "$WG_INTERFACE" public-key)"
-        ok "WireGuard prepared: $WG_INTERFACE / UDP $WG_PORT"
+        ok "WireGuard prepared: $WG_INTERFACE ($WG_HUB_IP) / UDP $WG_PORT"
         return
     fi
+
+    # Find a free UDP port
+    WG_PORT="$(find_free_port "${ASDL_WG_PORT:-51820}")"
+    ok "Using WireGuard port: UDP $WG_PORT"
 
     # Find a free 10.X.0.0/24 subnet
     local hub_ip subnet found=0
     for third in 100 101 102 103 104 105 150 200 201 202; do
-    subnet="10.${third}.0.0/24"
-    hub_ip="10.${third}.0.1"
-    if ! ip addr show | grep -q "10\.${third}\."; then
-        found=1
-        break
-    fi
-done
-
-# if still not found, try 192.168.x range
-if [[ "$found" -eq 0 ]]; then
-    for third in 200 201 202 203 204 210 220; do
-        subnet="192.168.${third}.0/24"
-        hub_ip="192.168.${third}.1"
-        if ! ip addr show | grep -q "192\.168\.${third}\."; then
+        subnet="10.${third}.0.0/24"
+        hub_ip="10.${third}.0.1"
+        if ! ip addr show | grep -q "10\.${third}\."; then
             found=1
             break
         fi
     done
-fi
 
-    [[ "$found" -eq 1 ]] || die "Could not find a free subnet in 10.x.0.0/24 range."
+    # Fallback to 192.168.x range
+    if [[ "$found" -eq 0 ]]; then
+        for third in 200 201 202 203 204 210 220; do
+            subnet="192.168.${third}.0/24"
+            hub_ip="192.168.${third}.1"
+            if ! ip addr show | grep -q "192\.168\.${third}\."; then
+                found=1
+                break
+            fi
+        done
+    fi
+
+    [[ "$found" -eq 1 ]] || die "Could not find a free subnet."
     ok "Using subnet: $subnet"
 
-    # Update globals for write_env
     WG_HUB_IP="$hub_ip"
     WG_NETWORK="$subnet"
 
@@ -408,6 +425,7 @@ EOF
     chmod 600 "$INSTALL_DIR/.env"
     ok "Configuration written."
 }
+
 
 install_files() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
