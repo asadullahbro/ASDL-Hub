@@ -372,8 +372,10 @@ EOF
 
 install_files() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    sleep 1
 
     mkdir -p "$INSTALL_DIR/bin"
+    rm -f "$INSTALL_DIR/bin/asdl-hub"
     cp "$PROJECT_DIR/bin/asdl-hub" "$INSTALL_DIR/bin/asdl-hub"
     chmod 755 "$INSTALL_DIR/bin/asdl-hub"
 
