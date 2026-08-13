@@ -50,12 +50,12 @@ set -e
 HUB_URL="%s"
 
 # Derive a short slug from the hub URL for namespacing
-# e.g. https://mail.asdl.website -> mail-asdl-website
-HUB_SLUG=$(echo "$HUB_URL" | sed 's|https\?://||' | sed 's|[.:/]|-|g' | tr '[:upper:]' '[:lower:]' | cut -c1-24)
+# e.g. https://hub.asdl.website -> hub-asdl-website
+HUB_SLUG=$(echo "$HUB_URL" | sed 's|https\?://||' | sed 's|/.*||' | sed 's|[^a-zA-Z0-9]|-|g' | tr '[:upper:]' '[:lower:]' | cut -c1-15)
 
 AGENT_BIN="/usr/local/bin/asdl-agent-${HUB_SLUG}"
 AGENT_SERVICE="asdl-agent-${HUB_SLUG}"
-WG_IFACE="asdl-${HUB_SLUG}"
+WG_IFACE="asdl-$(echo "$HUB_URL" | sed 's|https\?://||' | sed 's|/.*||' | sed 's|[^a-zA-Z0-9]|-|g' | tr '[:upper:]' '[:lower:]' | cut -c1-10)"
 
 echo "╔══════════════════════════════════════╗"
 echo "║        ASDL Hub Node Enrollment      ║"
