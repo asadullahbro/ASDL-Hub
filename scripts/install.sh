@@ -14,8 +14,6 @@ WG_PORT="${ASDL_WG_PORT:-51820}"
 HUB_PORT="${ASDL_HUB_PORT:-8080}"
 DOCS_URL="https://docs.asdl.website/asdl-hub"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -53,8 +51,147 @@ case "$ARCH" in
     *) die "Unsupported architecture: ${ARCH:-unknown}" ;;
 esac
 
-# The installer is expected to be run from a release/bootstrap context.
-# If this script is not inside a source tree, it downloads the latest source archive.
+# ── Firewall ────────────────────────────────────────────────────────────────
+
+setup_firewall() {
+    if ! command -v ufw >/dev/null 2>&1; then
+        warn "UFW not installed. Make sure your VPS firewall allows TCP 80/443 and UDP $WG_PORT."
+        return
+    fi
+
+    if ! ufw status | grep -q '^Status: active'; then
+        warn "UFW is inactive. Make sure your VPS firewall allows TCP 80, UDP $WG_PORT${USE_TLS:+, TCP 443}."
+        return
+    fi
+
+    info "Configuring UFW..."
+    ufw allow 80/tcp >/dev/null
+    [[ "$USE_TLS" -eq 1 ]] && ufw allow 443/tcp >/dev/null
+    ufw allow "${WG_PORT}/udp" >/dev/null
+    ok "Firewall configured."
+}
+
+# ── Nginx ───────────────────────────────────────────────────────────────────
+
+setup_nginx() {
+    local CONFIG="/etc/nginx/sites-available/asdl-hub"
+    local ENABLED="/etc/nginx/sites-enabled/asdl-hub"
+
+    info "Configuring Nginx..."
+
+    cat > "$CONFIG" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $HUB_HOST;
+
+    location / {
+        proxy_pass http://127.0.0.1:$HUB_PORT;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 3600;
+        proxy_connect_timeout 60;
+    }
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:$HUB_PORT;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 3600;
+        proxy_connect_timeout 60;
+    }
+}
+EOF
+
+    ln -sfn "$CONFIG" "$ENABLED"
+    rm -f /etc/nginx/sites-enabled/default
+
+    nginx -t
+    systemctl enable nginx
+    systemctl reload nginx
+    ok "Nginx configured."
+
+    if [[ "$USE_TLS" -eq 1 && -n "$HUB_DOMAIN" ]]; then
+        info "Requesting Let's Encrypt certificate..."
+        if ! command -v certbot >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y certbot python3-certbot-nginx
+        fi
+
+        if certbot --nginx \
+            --non-interactive \
+            --agree-tos \
+            --register-unsafely-without-email \
+            --redirect \
+            -d "$HUB_DOMAIN"; then
+            ok "HTTPS configured."
+        else
+            warn "HTTPS could not be configured yet. Make sure DNS points $HUB_DOMAIN to this server."
+            warn "The Hub is still available at: http://$HUB_DOMAIN"
+        fi
+    fi
+}
+
+# ── Build ───────────────────────────────────────────────────────────────────
+
+build() {
+    info "Building ASDL Hub..."
+
+    local BIN_DIR="$INSTALL_DIR/bin"
+    local BINARY="$BIN_DIR/asdl-hub"
+
+    cd "$PROJECT_DIR"
+    [[ -f go.mod ]] || die "go.mod not found in $PROJECT_DIR"
+
+    mkdir -p "$BIN_DIR"
+
+    info "Downloading Go dependencies..."
+    go mod download
+
+    if [[ -d "$PROJECT_DIR/dashboard" && -f "$PROJECT_DIR/dashboard/package.json" ]]; then
+        info "Building dashboard..."
+        cd "$PROJECT_DIR/dashboard"
+        if [[ -f package-lock.json ]]; then
+            npm ci --silent --no-fund --no-audit
+        else
+            npm install --silent --no-fund --no-audit
+        fi
+        npm run build
+        cd "$PROJECT_DIR"
+    fi
+
+    info "Building Go binary..."
+    if [[ -f "$PROJECT_DIR/cmd/hub/main.go" ]]; then
+        go build -trimpath -ldflags="-s -w" -o "$BINARY" ./cmd/hub
+    elif [[ -f "$PROJECT_DIR/main.go" ]]; then
+        go build -trimpath -ldflags="-s -w" -o "$BINARY" .
+    else
+        die "Could not find Hub entrypoint."
+    fi
+
+    chmod 755 "$BINARY"
+    "$BINARY" --version >/dev/null 2>&1 || true
+    ok "Build complete: $BINARY"
+}
+
+# ── Main functions ───────────────────────────────────────────────────────────
+
 prepare_source() {
     if [[ -f "$PWD/go.mod" && ( -d "$PWD/cmd" || -f "$PWD/main.go" ) ]]; then
         PROJECT_DIR="$PWD"
@@ -65,9 +202,7 @@ prepare_source() {
     local repo="${ASDL_HUB_REPO:-}"
     local ref="${ASDL_HUB_REF:-main}"
 
-    if [[ -z "$repo" ]]; then
-        die "No ASDL Hub source configured. Set ASDL_HUB_REPO for bootstrap installs, or run from the project directory."
-    fi
+    [[ -n "$repo" ]] || die "No ASDL Hub source configured. Set ASDL_HUB_REPO or run from the project directory."
 
     local tmp
     tmp="$(mktemp -d)"
@@ -95,8 +230,7 @@ install_packages() {
         nginx \
         wireguard \
         iproute2 \
-        iptables \
-        ss
+        iptables
     ok "System dependencies ready."
 }
 
@@ -131,9 +265,8 @@ configure_endpoint() {
     read -r -p "Domain (optional): " HUB_DOMAIN
 
     if [[ -n "$HUB_DOMAIN" ]]; then
-        if [[ ! "$HUB_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]; then
-            die "Invalid domain name: $HUB_DOMAIN"
-        fi
+        [[ "$HUB_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] \
+            || die "Invalid domain name: $HUB_DOMAIN"
         HUB_HOST="$HUB_DOMAIN"
         HUB_URL="https://$HUB_DOMAIN"
         USE_TLS=1
@@ -161,9 +294,9 @@ generate_secrets() {
     mkdir -p "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
 
-    local old_jwt old_admin old_db
-    old_jwt="$(awk -F= '$1=="JWT_SECRET"{sub(/^[^=]*=/,"");print;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
-    old_admin="$(awk -F= '$1=="ADMIN_PASSWORD"{sub(/^[^=]*=/,"");print;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+    local old_jwt old_admin
+    old_jwt="$(awk -F= '$1=="JWT_SECRET"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+    old_admin="$(awk -F= '$1=="ADMIN_PASSWORD"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
 
     if [[ -s "$INSTALL_DIR/.db_password" ]]; then
         DB_PASSWORD="$(cat "$INSTALL_DIR/.db_password")"
@@ -174,12 +307,7 @@ generate_secrets() {
     fi
 
     JWT_SECRET="${old_jwt:-$(openssl rand -hex 48)}"
-
-    if [[ -n "$old_admin" ]]; then
-        ADMIN_PASSWORD="$old_admin"
-    else
-        ADMIN_PASSWORD="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 24)"
-    fi
+    ADMIN_PASSWORD="${old_admin:-$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 24)}"
 
     ok "Secrets ready."
 }
@@ -209,15 +337,8 @@ setup_wireguard() {
     command -v wg >/dev/null || die "WireGuard tools are unavailable."
     wg show >/dev/null 2>&1 || modprobe wireguard 2>/dev/null || true
 
-    # asdl0 is the preferred interface name. If occupied, choose the first
-    # free asdlN name automatically. No user interaction required.
     if ip link show "$WG_INTERFACE" >/dev/null 2>&1; then
-        local owner=""
         if [[ -f "/etc/wireguard/${WG_INTERFACE}.conf" ]]; then
-            owner="wireguard-config"
-        fi
-
-        if [[ -n "$owner" ]]; then
             ok "Reusing existing WireGuard interface: $WG_INTERFACE"
         else
             local i=1
@@ -235,7 +356,6 @@ setup_wireguard() {
         die "UDP port $WG_PORT is already in use. Set ASDL_WG_PORT to another port and retry."
     fi
 
-    # Only enable forwarding if the Hub needs it. Safe, persistent and automatic.
     sysctl -w net.ipv4.ip_forward=1 >/dev/null
     if grep -qE '^[[:space:]]*net\.ipv4\.ip_forward=' /etc/sysctl.conf; then
         sed -i 's/^[[:space:]]*net\.ipv4\.ip_forward=.*/net.ipv4.ip_forward=1/' /etc/sysctl.conf
@@ -271,29 +391,18 @@ EOF
     ok "Configuration written."
 }
 
-build() {
-    info "Building ASDL Hub..."
-    mkdir -p "$INSTALL_DIR/bin"
-
-    "$PROJECT_DIR/scripts/build.sh" "$PROJECT_DIR" "$INSTALL_DIR"
-    ok "ASDL Hub built."
-}
-
 install_files() {
-    # Copy runtime assets. The source tree remains disposable.
     if [[ -d "$PROJECT_DIR/dashboard/.next" ]]; then
         rm -rf "$INSTALL_DIR/dashboard"
         cp -a "$PROJECT_DIR/dashboard" "$INSTALL_DIR/dashboard"
     fi
-
     chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
     chmod 755 "$INSTALL_DIR/bin/asdl-hub"
 }
 
 setup_service() {
-    info "Configuring service..."
-
+    info "Configuring systemd service..."
     cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=ASDL Hub
@@ -317,18 +426,9 @@ ProtectHome=true
 [Install]
 WantedBy=multi-user.target
 EOF
-
     systemctl daemon-reload
     systemctl enable "$SERVICE_NAME"
     ok "Systemd service configured."
-}
-
-setup_firewall() {
-    "$SCRIPT_DIR/setup-firewall.sh" "$WG_PORT" "$USE_TLS"
-}
-
-setup_nginx() {
-    "$SCRIPT_DIR/setup-nginx.sh" "$HUB_HOST" "$HUB_PORT" "$USE_TLS" "$HUB_DOMAIN" "$HUB_URL"
 }
 
 verify() {
@@ -349,10 +449,10 @@ verify() {
 
     if [[ "$USE_TLS" -eq 1 ]]; then
         curl -fsS --max-time 15 "$HUB_URL/health" >/dev/null \
-            || warn "Local health passed, but the public HTTPS health check failed. Check DNS/firewall/TLS."
+            || warn "Local health passed but public HTTPS check failed. Check DNS/firewall/TLS."
     else
         curl -fsS --max-time 15 "$HUB_URL/health" >/dev/null \
-            || warn "Local health passed, but the public health check failed. Check your VPS firewall/provider firewall."
+            || warn "Local health passed but public check failed. Check your VPS firewall."
     fi
 }
 
@@ -362,16 +462,13 @@ summary() {
     echo "║                 ASDL Hub is ready! 🚀                       ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo
-    echo "  Dashboard:     $HUB_URL"
-    echo "  Health:        $HUB_URL/health"
+    echo "  Dashboard:      $HUB_URL"
+    echo "  Health:         $HUB_URL/health"
     echo
-    echo "  Admin user:    admin"
+    echo "  Admin user:     admin"
     echo "  Admin password: $ADMIN_PASSWORD"
     echo
-    echo "  WireGuard:     $WG_INTERFACE / UDP $WG_PORT"
-    echo
-    echo "  Documentation:"
-    echo "    $DOCS_URL"
+    echo "  WireGuard:      $WG_INTERFACE / UDP $WG_PORT"
     echo
     echo "  Logs:"
     echo "    journalctl -u $SERVICE_NAME -f"
