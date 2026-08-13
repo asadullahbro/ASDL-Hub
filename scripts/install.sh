@@ -418,6 +418,8 @@ WG_INTERFACE=$WG_INTERFACE
 WG_PORT=$WG_PORT
 WG_HUB_IP=$WG_HUB_IP
 WG_NETWORK=$WG_NETWORK
+WG_CIDR=$WG_NETWORK
+WG_START_IP=${WG_HUB_IP%.*}.2
 VPN_NETWORKS=$WG_NETWORK,127.0.0.0/8,::1/128
 WG_HUB_PUBKEY=$WG_HUB_PUBKEY
 WG_ENDPOINT=$HUB_HOST:$WG_PORT
@@ -425,7 +427,6 @@ EOF
     chmod 600 "$INSTALL_DIR/.env"
     ok "Configuration written."
 }
-
 
 install_files() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
