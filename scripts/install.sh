@@ -218,6 +218,25 @@ detect_public_ip() {
 }
 
 configure_endpoint() {
+    # Reuse existing config on upgrade
+    if [[ -f "$INSTALL_DIR/.env" ]]; then
+        existing_url="$(awk -F= '$1=="PUBLIC_URL"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+        if [[ -n "$existing_url" ]]; then
+            HUB_URL="$existing_url"
+            if [[ "$HUB_URL" == https://* ]]; then
+                HUB_DOMAIN="${HUB_URL#https://}"
+                HUB_HOST="$HUB_DOMAIN"
+                USE_TLS=1
+            else
+                HUB_HOST="${HUB_URL#http://}"
+                HUB_DOMAIN=""
+                USE_TLS=0
+            fi
+            ok "Reusing existing endpoint: $HUB_URL"
+            return
+        fi
+    fi
+
     echo
     echo "How should users access this Hub?"
     echo "Leave the domain empty to use the detected public IP."
