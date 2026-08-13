@@ -49,9 +49,20 @@ set -e
 
 HUB_URL="%s"
 
+# Derive a short slug from the hub URL for namespacing
+# e.g. https://mail.asdl.website -> mail-asdl-website
+HUB_SLUG=$(echo "$HUB_URL" | sed 's|https\?://||' | sed 's|[.:/]|-|g' | tr '[:upper:]' '[:lower:]' | cut -c1-24)
+
+AGENT_BIN="/usr/local/bin/asdl-agent-${HUB_SLUG}"
+AGENT_SERVICE="asdl-agent-${HUB_SLUG}"
+WG_IFACE="asdl-${HUB_SLUG}"
+
 echo "╔══════════════════════════════════════╗"
 echo "║        ASDL Hub Node Enrollment      ║"
 echo "╚══════════════════════════════════════╝"
+echo ""
+echo "   Hub:  $HUB_URL"
+echo "   Slug: $HUB_SLUG"
 echo ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -73,19 +84,19 @@ detect_os() {
                 || echo "$USER" \
                 || whoami)
             ;;
-      darwin)
-    if SSH_USER=$(logname 2>/dev/null) && [ -n "$SSH_USER" ]; then
-        :
-    elif SSH_USER=$(stat -f '%%Su' /dev/console 2>/dev/null) && [ -n "$SSH_USER" ]; then
-        :
-    elif [ -n "$SUDO_USER" ]; then
-        SSH_USER="$SUDO_USER"
-    elif [ -n "$USER" ]; then
-        SSH_USER="$USER"
-    else
-        SSH_USER=$(whoami)
-    fi
-    ;;
+        darwin)
+            if SSH_USER=$(logname 2>/dev/null) && [ -n "$SSH_USER" ]; then
+                :
+            elif SSH_USER=$(stat -f '%%Su' /dev/console 2>/dev/null) && [ -n "$SSH_USER" ]; then
+                :
+            elif [ -n "$SUDO_USER" ]; then
+                SSH_USER="$SUDO_USER"
+            elif [ -n "$USER" ]; then
+                SSH_USER="$USER"
+            else
+                SSH_USER=$(whoami)
+            fi
+            ;;
         *)
             echo "❌ Unsupported OS: $OS"
             echo "   Supported: linux, darwin (macOS)"
@@ -99,15 +110,12 @@ detect_os() {
     fi
 
     echo "📋 Detected:"
-    echo "   OS: $OS"
-    echo "   Arch: $ARCH"
+    echo "   OS:       $OS"
+    echo "   Arch:     $ARCH"
     echo "   Hostname: $HOSTNAME"
-    echo "   SSH User: $SSH_USER"
+    echo "   User:     $SSH_USER"
 }
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 2: Check privileges
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 2: Check privileges
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -132,6 +140,32 @@ check_privileges() {
             ;;
     esac
 }
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STEP 2.5: Check for existing agent for this hub
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+check_existing_agent() {
+    if [ -f "$AGENT_BIN" ] || systemctl is-active --quiet "$AGENT_SERVICE" 2>/dev/null; then
+        echo ""
+        echo "⚠️  This node is already enrolled with $HUB_URL"
+        echo ""
+        read -r -p "   Re-enroll? This will replace the existing agent. [y/N]: " confirm </dev/tty
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Aborted."
+            exit 0
+        fi
+        # Stop existing before re-enrolling
+        case "$OS" in
+            linux)
+                systemctl stop "$AGENT_SERVICE" 2>/dev/null || true
+                ;;
+            darwin)
+                sudo launchctl bootout "system/website.asdl.agent.${HUB_SLUG}" 2>/dev/null || true
+                ;;
+        esac
+    fi
+}
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 3: Collect enrollment info
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -247,7 +281,7 @@ enroll_with_hub() {
     SSH_PUBLIC_KEY=$(echo "$RESPONSE" | jq -r '.ssh_public_key')
     HUB_VPN_IP=$(echo "$RESPONSE" | jq -r '.hub_vpn_ip')
     HUB_PORT=$(echo "$RESPONSE" | jq -r '.hub_port')
-	WG_NETWORK=$(echo "$RESPONSE" | jq -r '.wireguard_network // "10.100.0.0/24"')
+    WG_NETWORK=$(echo "$RESPONSE" | jq -r '.wireguard_network // "10.100.0.0/24"')
 
     if [ "$NODE_ID" = "null" ] || [ -z "$NODE_ID" ]; then
         echo "❌ Enrollment failed. Response was:"
@@ -256,7 +290,7 @@ enroll_with_hub() {
     fi
 
     echo "✅ Enrolled!"
-    echo "   Node ID: $NODE_ID"
+    echo "   Node ID:     $NODE_ID"
     echo "   Assigned IP: $ASSIGNED_IP"
 }
 
@@ -288,20 +322,20 @@ download_agent() {
         linux)
             BINARY="asdl-agent-linux"
             curl -fsSL "https://github.com/asadullahbro/asdl-agent/releases/latest/download/${BINARY}" \
-                -o /usr/local/bin/asdl-agent
-            chmod +x /usr/local/bin/asdl-agent
+                -o "$AGENT_BIN"
+            chmod +x "$AGENT_BIN"
             ;;
         darwin)
             BINARY="asdl-agent-mac"
             if [ "$ARCH" = "arm64" ]; then BINARY="asdl-agent-mac-arm64"; fi
             curl -fsSL "https://github.com/asadullahbro/asdl-agent/releases/latest/download/${BINARY}" \
-                -o /tmp/asdl-agent
-            sudo mv /tmp/asdl-agent /usr/local/bin/asdl-agent
-            sudo chmod +x /usr/local/bin/asdl-agent
+                -o /tmp/asdl-agent-tmp
+            sudo mv /tmp/asdl-agent-tmp "$AGENT_BIN"
+            sudo chmod +x "$AGENT_BIN"
             ;;
     esac
 
-    echo "✅ Agent downloaded to /usr/local/bin/asdl-agent"
+    echo "✅ Agent downloaded to $AGENT_BIN"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -311,33 +345,32 @@ save_agent_config() {
     echo ""
     echo "💾 Saving agent configuration..."
 
-    # Agent always communicates over the WireGuard mesh — never the public URL
     case "$OS" in
         linux)
-            mkdir -p /etc/asdl
-            cat > /etc/asdl/agent.conf << EOF
+            mkdir -p "/etc/asdl/${HUB_SLUG}"
+            cat > "/etc/asdl/${HUB_SLUG}/agent.conf" << EOF
 hub_url: http://${HUB_VPN_IP}:${HUB_PORT}
 node_id: ${NODE_ID}
 vpn_ip: ${ASSIGNED_IP}
 enrolled: true
 interval: 30s
-work_dir: /tmp/asdl
+work_dir: /tmp/asdl-${HUB_SLUG}
 max_jobs: 5
 EOF
-            chmod 600 /etc/asdl/agent.conf
+            chmod 600 "/etc/asdl/${HUB_SLUG}/agent.conf"
             ;;
         darwin)
-            sudo mkdir -p /usr/local/etc/asdl
-            sudo tee /usr/local/etc/asdl/agent.conf > /dev/null << EOF
+            sudo mkdir -p "/usr/local/etc/asdl/${HUB_SLUG}"
+            sudo tee "/usr/local/etc/asdl/${HUB_SLUG}/agent.conf" > /dev/null << EOF
 hub_url: http://${HUB_VPN_IP}:${HUB_PORT}
 node_id: ${NODE_ID}
 vpn_ip: ${ASSIGNED_IP}
 enrolled: true
 interval: 30s
-work_dir: /tmp/asdl
+work_dir: /tmp/asdl-${HUB_SLUG}
 max_jobs: 5
 EOF
-            sudo chmod 600 /usr/local/etc/asdl/agent.conf
+            sudo chmod 600 "/usr/local/etc/asdl/${HUB_SLUG}/agent.conf"
             ;;
     esac
 
@@ -353,15 +386,15 @@ install_service() {
 
     case "$OS" in
         linux)
-            cat > /etc/systemd/system/asdl-agent.service << EOF
+            cat > "/etc/systemd/system/${AGENT_SERVICE}.service" << EOF
 [Unit]
-Description=ASDL Agent
-After=network.target wg-quick@asdl0.service
-Wants=wg-quick@asdl0.service
+Description=ASDL Agent (${HUB_SLUG})
+After=network.target wg-quick@${WG_IFACE}.service
+Wants=wg-quick@${WG_IFACE}.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/asdl-agent -config /etc/asdl/agent.conf
+ExecStart=${AGENT_BIN} -config /etc/asdl/${HUB_SLUG}/agent.conf
 Restart=always
 RestartSec=10
 User=root
@@ -372,7 +405,8 @@ EOF
             systemctl daemon-reload
             ;;
         darwin)
-            PLIST_PATH="/Library/LaunchDaemons/website.asdl.agent.plist"
+            PLIST_LABEL="website.asdl.agent.${HUB_SLUG}"
+            PLIST_PATH="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
             sudo tee "$PLIST_PATH" > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -380,13 +414,13 @@ EOF
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>website.asdl.agent</string>
+    <string>${PLIST_LABEL}</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/asdl-agent</string>
+        <string>${AGENT_BIN}</string>
         <string>-config</string>
-        <string>/usr/local/etc/asdl/agent.conf</string>
+        <string>/usr/local/etc/asdl/${HUB_SLUG}/agent.conf</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -394,9 +428,9 @@ EOF
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/var/log/asdl-agent.log</string>
+    <string>/var/log/asdl-agent-${HUB_SLUG}.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/asdl-agent.err</string>
+    <string>/var/log/asdl-agent-${HUB_SLUG}.err</string>
 </dict>
 </plist>
 EOF
@@ -405,7 +439,7 @@ EOF
             ;;
     esac
 
-    echo "✅ Service definition installed"
+    echo "✅ Service installed: $AGENT_SERVICE"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -418,7 +452,7 @@ write_wireguard_config() {
     case "$OS" in
         linux)
             mkdir -p /etc/wireguard
-            cat > /etc/wireguard/asdl0.conf << EOF
+            cat > "/etc/wireguard/${WG_IFACE}.conf" << EOF
 [Interface]
 PrivateKey = ${WG_PRIVATE_KEY}
 Address = ${ASSIGNED_IP}/24
@@ -429,11 +463,11 @@ Endpoint = ${HUB_WG_ENDPOINT}
 AllowedIPs = ${WG_NETWORK}
 PersistentKeepalive = 25
 EOF
-            chmod 600 /etc/wireguard/asdl0.conf
+            chmod 600 "/etc/wireguard/${WG_IFACE}.conf"
             ;;
         darwin)
             sudo mkdir -p /usr/local/etc/wireguard
-            sudo tee /usr/local/etc/wireguard/asdl0.conf > /dev/null << EOF
+            sudo tee "/usr/local/etc/wireguard/${WG_IFACE}.conf" > /dev/null << EOF
 [Interface]
 PrivateKey = ${WG_PRIVATE_KEY}
 Address = ${ASSIGNED_IP}/24
@@ -444,11 +478,11 @@ Endpoint = ${HUB_WG_ENDPOINT}
 AllowedIPs = ${WG_NETWORK}
 PersistentKeepalive = 25
 EOF
-            sudo chmod 600 /usr/local/etc/wireguard/asdl0.conf
+            sudo chmod 600 "/usr/local/etc/wireguard/${WG_IFACE}.conf"
             ;;
     esac
 
-    echo "✅ WireGuard configuration saved"
+    echo "✅ WireGuard config saved: ${WG_IFACE}"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -460,20 +494,18 @@ start_wireguard() {
 
     case "$OS" in
         linux)
-            systemctl enable wg-quick@asdl0 2>/dev/null || true
-            systemctl start wg-quick@asdl0
+            systemctl enable "wg-quick@${WG_IFACE}" 2>/dev/null || true
+            systemctl start "wg-quick@${WG_IFACE}"
             ;;
         darwin)
-            # Remove any conflicting route before bringing tunnel up
-            sudo route delete -net ${WG_NETWORK} 2>/dev/null || true
-            sudo wg-quick down /usr/local/etc/wireguard/asdl0.conf 2>/dev/null || true
-            sudo wg-quick up /usr/local/etc/wireguard/asdl0.conf
-            # Verify route was added
+            sudo route delete -net "${WG_NETWORK}" 2>/dev/null || true
+            sudo wg-quick down "/usr/local/etc/wireguard/${WG_IFACE}.conf" 2>/dev/null || true
+            sudo wg-quick up "/usr/local/etc/wireguard/${WG_IFACE}.conf"
             if ! netstat -rn | grep -q utun; then
                 echo "⚠️  Route not added by wg-quick, adding manually..."
-                TUNNEL=$(sudo wg show asdl0 2>/dev/null | grep -o 'utun[0-9]*' | head -1)
+                TUNNEL=$(sudo wg show "${WG_IFACE}" 2>/dev/null | grep -o 'utun[0-9]*' | head -1)
                 if [ -n "$TUNNEL" ]; then
-                    sudo route add -net ${WG_NETWORK} -interface "$TUNNEL" 2>/dev/null || true
+                    sudo route add -net "${WG_NETWORK}" -interface "$TUNNEL" 2>/dev/null || true
                 fi
             fi
             ;;
@@ -481,6 +513,7 @@ start_wireguard() {
 
     echo "✅ WireGuard started — IP: $ASSIGNED_IP"
 }
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 14: Start service
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -490,17 +523,18 @@ start_service() {
 
     case "$OS" in
         linux)
-            systemctl enable asdl-agent
-            systemctl start asdl-agent
+            systemctl enable "$AGENT_SERVICE"
+            systemctl start "$AGENT_SERVICE"
             ;;
         darwin)
-            PLIST_PATH="/Library/LaunchDaemons/website.asdl.agent.plist"
-            sudo launchctl bootout system/website.asdl.agent 2>/dev/null || true
+            PLIST_LABEL="website.asdl.agent.${HUB_SLUG}"
+            PLIST_PATH="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
+            sudo launchctl bootout "system/${PLIST_LABEL}" 2>/dev/null || true
             sudo launchctl bootstrap system "$PLIST_PATH"
             ;;
     esac
 
-    echo "✅ Service started"
+    echo "✅ Service started: $AGENT_SERVICE"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -509,6 +543,7 @@ start_service() {
 
 detect_os
 check_privileges
+check_existing_agent
 collect_info
 install_dependencies
 generate_wireguard_keys
@@ -527,10 +562,12 @@ echo "╔═══════════════════════�
 echo "║         Enrollment Complete! ✅       ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
-echo "   Node ID:  ${NODE_ID}"
-echo "   VPN IP:   ${ASSIGNED_IP}"
-echo "   Hub:      http://${HUB_VPN_IP}:${HUB_PORT}"
-echo "   OS:       ${OS}"
+echo "   Node ID:    ${NODE_ID}"
+echo "   VPN IP:     ${ASSIGNED_IP}"
+echo "   Hub:        http://${HUB_VPN_IP}:${HUB_PORT}"
+echo "   Interface:  ${WG_IFACE}"
+echo "   Service:    ${AGENT_SERVICE}"
+echo "   OS:         ${OS}"
 echo ""
 echo "Node will appear in your dashboard shortly."
 `, hubURL)
