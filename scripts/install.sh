@@ -335,6 +335,18 @@ setup_wireguard() {
     fi
 done
 
+# if still not found, try 192.168.x range
+if [[ "$found" -eq 0 ]]; then
+    for third in 200 201 202 203 204 210 220; do
+        subnet="192.168.${third}.0/24"
+        hub_ip="192.168.${third}.1"
+        if ! ip addr show | grep -q "192\.168\.${third}\."; then
+            found=1
+            break
+        fi
+    done
+fi
+
     [[ "$found" -eq 1 ]] || die "Could not find a free subnet in 10.x.0.0/24 range."
     ok "Using subnet: $subnet"
 
