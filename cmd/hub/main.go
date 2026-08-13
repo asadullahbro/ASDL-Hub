@@ -745,8 +745,8 @@ func main() {
 	public := router.Group("/api/v1")
 	{
 		// Public — agent calls this during enrollment
-	public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
-	public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
+		public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
+		public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
 
 		// Install script
 		router.GET("/install", func(c *gin.Context) {
