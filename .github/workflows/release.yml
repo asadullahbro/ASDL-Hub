@@ -6,11 +6,9 @@ on:
       - main
     tags:
       - "v*.*.*"
-
   pull_request:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
@@ -76,20 +74,11 @@ jobs:
           CGO_ENABLED: 0
         run: |
           mkdir -p dist
-
-          if [ -f "cmd/hub/main.go" ]; then
-            go build \
-              -trimpath \
-              -ldflags="-s -w" \
-              -o "dist/asdl-hub-${GOOS}-${GOARCH}" \
-              ./cmd/hub
-          else
-            go build \
-              -trimpath \
-              -ldflags="-s -w" \
-              -o "dist/asdl-hub-${GOOS}-${GOARCH}" \
-              .
-          fi
+          go build \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o "dist/asdl-hub-${GOOS}-${GOARCH}" \
+            ./cmd/hub
 
       - name: Package release
         run: |
@@ -114,11 +103,18 @@ jobs:
             -czf "release/${PACKAGE}.tar.gz" \
             "${PACKAGE}"
 
-      - name: Upload artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: asdl-hub-linux-${{ matrix.goarch }}
           path: release/*.tar.gz
+
+      - name: Upload install script
+        if: matrix.goarch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-script
+          path: scripts/install.sh
 
   release:
     name: Publish GitHub Release
@@ -127,17 +123,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download release artifacts
+      - name: Download binary artifacts
         uses: actions/download-artifact@v4
         with:
           path: release
           pattern: asdl-hub-linux-*
           merge-multiple: true
 
+      - name: Download install script
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: install-script
+          merge-multiple: true
+
       - name: Generate checksums
         working-directory: release
-        run: |
-          sha256sum *.tar.gz > SHA256SUMS
+        run: sha256sum *.tar.gz > SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -146,3 +148,4 @@ jobs:
           files: |
             release/*.tar.gz
             release/SHA256SUMS
+            release/install.sh
