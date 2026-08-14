@@ -164,12 +164,17 @@ prepare_source() {
     tmp="$(mktemp -d)"
     trap '[[ -n "${tmp:-}" ]] && rm -rf "$tmp"' EXIT
 
-    info "Fetching latest version..."
-    version="$(curl -fsSL --max-time 10 \
-        https://api.github.com/repos/asadullahbro/ASDL-Hub/releases/latest \
-        | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
-    [[ -n "$version" ]] || die "Could not determine latest version."
-    ok "Latest version: $version"
+    if [[ -n "${VERSION:-}" ]]; then
+        version="$VERSION"
+        ok "Pinned version: $version"
+    else
+        info "Fetching latest version..."
+        version="$(curl -fsSL --max-time 10 \
+            https://api.github.com/repos/asadullahbro/ASDL-Hub/releases/latest \
+            | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+        [[ -n "$version" ]] || die "Could not determine latest version."
+        ok "Latest version: $version"
+    fi
 
     info "Downloading ASDL Hub $version..."
     curl -fL --retry 3 --connect-timeout 10 \
