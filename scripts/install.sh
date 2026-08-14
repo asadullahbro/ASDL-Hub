@@ -6,6 +6,7 @@ set -Eeuo pipefail
 #   curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
 
 APP_NAME="ASDL Hub"
+VERSION=""  # stamped at release time by CI
 INSTALL_DIR="/opt/asdl-hub"
 SERVICE_NAME="asdl-hub"
 RUN_USER="asdl-hub"
