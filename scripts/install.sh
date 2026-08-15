@@ -225,6 +225,9 @@ detect_public_ip() {
 }
 
 configure_endpoint() {
+    # stop old hub process if running
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    sleep 1
     # Reuse existing config on upgrade
     if [[ -f "$INSTALL_DIR/.env" ]]; then
         existing_url="$(awk -F= '$1=="PUBLIC_URL"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
