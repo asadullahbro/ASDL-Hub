@@ -229,7 +229,15 @@ configure_endpoint() {
     if [[ -f "$INSTALL_DIR/.env" ]]; then
         existing_url="$(awk -F= '$1=="PUBLIC_URL"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
         existing_port="$(awk -F= '$1=="SERVER_PORT"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
-        [[ -n "$existing_port" ]] && HUB_PORT="$existing_port"
+        if [[ -n "$existing_port" ]]; then
+            if ss -tlpn | grep -q ":${existing_port} "; then
+                warn "Port $existing_port is in use. Finding a free port..."
+                HUB_PORT="$(find_free_hub_port 8080)"
+                ok "Switching to port: TCP $HUB_PORT"
+            else
+                HUB_PORT="$existing_port"
+            fi
+        fi
         if [[ -n "$existing_url" ]]; then
             HUB_URL="$existing_url"
             if [[ "$HUB_URL" == https://* ]]; then
