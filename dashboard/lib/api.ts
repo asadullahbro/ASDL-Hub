@@ -20,7 +20,6 @@ import {
   AllProjectsHealthResponse,
   EnrollmentToken,
   OIDCDeployment,
-  RepoDeploymentRule
 
 } from '@/types';
 
@@ -304,24 +303,6 @@ revokeEnrollmentToken: (id: string): Promise<{ revoked: boolean }> =>
   request(`/enrollment/tokens/${id}`, { method: 'DELETE' }),
 
 //github
-
-listDeployRules: (): Promise<RepoDeploymentRule[]> =>
-  request<RepoDeploymentRule[]>('/deploy/rules'),
-
-createDeployRule: (data: {
-  repository: string;
-  environment: string;
-  project_id: string;
-  node_id: string;
-}): Promise<RepoDeploymentRule> =>
-  request<RepoDeploymentRule>('/deploy/rules', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-
-deleteDeployRule: (id: string): Promise<{ deleted: boolean }> =>
-  request(`/deploy/rules/${id}`, { method: 'DELETE' }),
-
 listDeployHistory: (): Promise<OIDCDeployment[]> =>
   request<OIDCDeployment[]>('/deploy/history'),
 };

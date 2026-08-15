@@ -11,7 +11,7 @@ type Project struct {
 	Name         string         `gorm:"size:255;not null" json:"name"`
 	Description  string         `gorm:"size:500" json:"description"`
 	Domain       string         `gorm:"size:255" json:"domain"`
-	Repository   string         `gorm:"size:255" json:"repository"` // ADD THIS
+	Repository   string         `gorm:"size:255;uniqueIndex" json:"repository"`
 	NodeID       string         `gorm:"index;not null" json:"node_id"`
 	ContainerID  string         `gorm:"index" json:"container_id"`
 	DeploymentID string         `gorm:"index" json:"deployment_id"`

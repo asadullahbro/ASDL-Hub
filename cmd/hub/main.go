@@ -1048,10 +1048,7 @@ echo "✅ Agent updated successfully"
 
 			operator.POST("/migrations", migrationService.MigrateProject)
 
-			// Operator+ — repo listing and linking
-			operator.GET("/deploy/rules", deployHandler.ListRules)
-			operator.POST("/deploy/rules", deployHandler.CreateRule)
-			operator.DELETE("/deploy/rules/:id", deployHandler.DeleteRule)
+			// Operator+ — repo listing
 			operator.GET("/deploy/history", deployHandler.ListDeployments)
 		}
 

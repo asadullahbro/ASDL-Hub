@@ -120,6 +120,7 @@ export interface Project {
   name: string;
   description: string;
   domain: string;
+  repository: string;
   node_id: string;
   status: string;
   health_status: string;
@@ -258,23 +259,13 @@ export interface EnrollmentToken {
   created_at: string;
   used_at: string | null;
 }
-export interface RepoDeploymentRule {
-  id: string;
-  repository: string;
-  repo_owner: string;
-  environment: string;
-  project_id: string;
-  node_id: string;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface OIDCDeployment {
   id: string;
-  rule_id: string;
   repository: string;
   environment: string;
+  project_id: string;
+  node_id: string;
   sha: string;
   ref: string;
   workflow: string;

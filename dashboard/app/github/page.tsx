@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { RepoDeploymentRule, OIDCDeployment, Project, Node } from '../../types';
-import { Github, RefreshCw, Trash2, Plus, X } from 'lucide-react';
+import { OIDCDeployment } from '../../types';
+import { Github, RefreshCw, X } from 'lucide-react';
 
 function statusDot(status: string) {
   const map: Record<string, string> = {
@@ -38,35 +38,14 @@ function timeAgo(dateStr: string) {
 }
 
 export default function GitHubPage() {
-  const [rules, setRules] = useState<RepoDeploymentRule[]>([]);
   const [history, setHistory] = useState<OIDCDeployment[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    repository: '',
-    environment: 'production',
-    project_id: '',
-    node_id: '',
-  });
-
   async function loadData() {
     try {
-      const [rulesData, historyData, projectsData, nodesData] = await Promise.all([
-        api.listDeployRules(),
-        api.listDeployHistory(),
-        api.getProjects(),
-        api.getNodes(),
-      ]);
-      setRules(rulesData ?? []);
+      const historyData = await api.listDeployHistory();
       setHistory(historyData ?? []);
-      setProjects(projectsData?.data ?? []);
-      setNodes(nodesData ?? []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -76,37 +55,6 @@ export default function GitHubPage() {
   }
 
   useEffect(() => { loadData(); }, []);
-
-  const handleCreate = async () => {
-    setSaving(true);
-    try {
-      await api.createDeployRule(form);
-      setShowForm(false);
-      setForm({ repository: '', environment: 'production', project_id: '', node_id: '' });
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create rule');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    setDeletingId(id);
-    try {
-      await api.deleteDeployRule(id);
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete rule');
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const getProjectName = (id: string) => projects.find(p => p.id === id)?.name ?? id;
-  const getNodeName   = (id: string) => nodes.find(n => n.id === id)?.hostname ?? id;
-
-  const formValid = form.repository.includes('/') && form.environment && form.project_id && form.node_id;
 
   if (loading) {
     return (
@@ -143,142 +91,20 @@ export default function GitHubPage() {
         </div>
       )}
 
-      {/* Deployment Rules */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div>
-            <span className="text-sm font-medium text-text-primary">Deployment Rules</span>
-            <p className="text-xs text-text-muted mt-0.5">
-              Authorize a GitHub repo to deploy to a project via OIDC — no secrets needed.
-            </p>
-          </div>
-          <button
-            onClick={() => setShowForm(f => !f)}
-            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
-          >
-            {showForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add Rule</>}
-          </button>
-        </div>
-
-        {/* Create form */}
-        {showForm && (
-          <div className="p-5 border-b border-border space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Repository</label>
-                <input
-                  type="text"
-                  value={form.repository}
-                  onChange={e => setForm(f => ({ ...f, repository: e.target.value }))}
-                  placeholder="owner/repo"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Environment</label>
-                <input
-                  type="text"
-                  value={form.environment}
-                  onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
-                  placeholder="production"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Project</label>
-                <select
-                  value={form.project_id}
-                  onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                >
-                  <option value="">— Select project —</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Target Node</label>
-                <select
-                  value={form.node_id}
-                  onChange={e => setForm(f => ({ ...f, node_id: e.target.value }))}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                >
-                  <option value="">— Select node —</option>
-                  {nodes.map(n => <option key={n.id} value={n.id}>{n.hostname}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={saving || !formValid}
-                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save Rule'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {rules.length === 0 ? (
-          <div className="px-5 py-12 text-center">
-            <p className="text-sm text-text-muted">No rules configured</p>
-            <p className="text-xs text-text-secondary mt-1">
-              Add a rule to let a GitHub workflow deploy via OIDC token — no long-lived secrets.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {rules.map(rule => (
-              <div key={rule.id} className="flex items-center justify-between px-5 py-3.5 group">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-text-primary font-mono">{rule.repository}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border text-text-muted font-mono">
-                      {rule.environment}
-                    </span>
-                    {!rule.enabled && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 border border-status-red/20 text-status-red">
-                        disabled
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
-                    <span>→ {getProjectName(rule.project_id)}</span>
-                    <span className="text-border">·</span>
-                    <span>{getNodeName(rule.node_id)}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDelete(rule.id)}
-                  disabled={deletingId === rule.id}
-                  className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
-                  title="Remove rule"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Deployment History */}
       <div className="bg-surface border border-border rounded-lg">
         <div className="px-5 py-4 border-b border-border">
           <span className="text-sm font-medium text-text-primary">Deployment History</span>
+          <p className="text-xs text-text-muted mt-0.5">
+            Deployments triggered from GitHub Actions via OIDC — no secrets needed.
+          </p>
         </div>
 
         {history.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <p className="text-sm text-text-muted">No deployments yet</p>
             <p className="text-xs text-text-secondary mt-1">
-              Deployments triggered from GitHub Actions will appear here.
+              Push to a repo with the workflow configured and it will appear here automatically.
             </p>
           </div>
         ) : (
@@ -301,6 +127,11 @@ export default function GitHubPage() {
                       <span className="text-border">·</span>
                       <span className="font-mono truncate max-w-[200px]">{d.image}</span>
                     </div>
+                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
+                      <span className="font-mono">project: {d.project_id.slice(0, 8)}</span>
+                      <span className="text-border">·</span>
+                      <span className="font-mono">node: {d.node_id.slice(0, 8)}</span>
+                    </div>
                     {d.error && (
                       <div className="mt-1 text-xs text-status-red font-mono truncate max-w-sm">
                         {d.error}
@@ -321,7 +152,9 @@ export default function GitHubPage() {
       <div className="bg-surface border border-border rounded-lg">
         <div className="px-5 py-4 border-b border-border">
           <span className="text-sm font-medium text-text-primary">Workflow Setup</span>
-          <p className="text-xs text-text-muted mt-0.5">Add this step to your GitHub Actions workflow.</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            Add this to your GitHub Actions workflow. No secrets required — the hub resolves the project automatically from the repository identity.
+          </p>
         </div>
         <div className="p-5">
           <pre className="bg-background border border-border rounded p-4 text-xs text-text-secondary font-mono overflow-x-auto leading-relaxed">{`permissions:
@@ -344,10 +177,8 @@ steps:
       curl -sSf -X POST \${HUB_URL}/api/v1/deploy \\
         -H "Content-Type: application/json" \\
         -d '{
-          "oidc_token":  "\${{ steps.oidc.outputs.token }}",
-          "project":     "myapp",
-          "environment": "production",
-          "image":       "registry.example.com/myapp:\${{ github.sha }}"
+          "oidc_token": "\${{ steps.oidc.outputs.token }}",
+          "image":      "registry.example.com/myapp:\${{ github.sha }}"
         }'`}
           </pre>
         </div>
