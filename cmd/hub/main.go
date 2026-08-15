@@ -1132,7 +1132,7 @@ func loadConfig() *Config {
 	// Server config from env
 	cfg.Server.Port = getEnvAsInt("SERVER_PORT", 8080)
 	cfg.Server.VPNNetworks = getEnvAsStringSlice("VPN_NETWORKS", []string{"10.100.0.0/24", "127.0.0.0/8", "::1/128"})
-	cfg.Server.HubURL = getEnv("HUB_URL", "")
+	cfg.Server.HubURL = getEnv("HUB_URL", getEnv("PUBLIC_URL", ""))
 
 	// Database config from env
 	cfg.Database.Host = getEnv("DB_HOST", "localhost")
