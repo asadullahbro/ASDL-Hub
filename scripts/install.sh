@@ -333,14 +333,19 @@ setup_wireguard() {
     command -v wg >/dev/null || die "WireGuard tools are unavailable."
     modprobe wireguard 2>/dev/null || true
 
-    # Reuse existing asdl0 if already up
     if ip link show "$WG_INTERFACE" >/dev/null 2>&1; then
         ok "Reusing existing WireGuard interface: $WG_INTERFACE"
-        WG_PORT="$(grep -E '^ListenPort' /etc/wireguard/${WG_INTERFACE}.conf | awk '{print $3}')"
-        WG_HUB_IP="$(grep -E '^Address' /etc/wireguard/${WG_INTERFACE}.conf | awk '{print $3}' | cut -d/ -f1)"
+
+        WG_PORT="$(wg show "$WG_INTERFACE" listen-port 2>/dev/null || true)"
+        WG_HUB_IP="$(ip -4 addr show "$WG_INTERFACE" | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)"
         WG_NETWORK="${WG_HUB_IP%.*}.0/24"
         WG_HUB_PUBKEY="$(wg show "$WG_INTERFACE" public-key)"
-        ok "WireGuard prepared: $WG_INTERFACE ($WG_HUB_IP) / UDP $WG_PORT"
+
+        [[ -n "$WG_PORT" ]]       || die "Could not read WireGuard listen port from $WG_INTERFACE."
+        [[ -n "$WG_HUB_IP" ]]     || die "Could not read WireGuard IP from $WG_INTERFACE."
+        [[ -n "$WG_HUB_PUBKEY" ]] || die "Could not read WireGuard public key from $WG_INTERFACE."
+
+        ok "WireGuard: $WG_INTERFACE ($WG_HUB_IP) / UDP $WG_PORT"
         return
     fi
 

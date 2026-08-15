@@ -52,8 +52,10 @@ A domain is optional. If you don't provide one, ASDL Hub can use the server's pu
 Full documentation:
 https://docs.asdl.website/asdl-hub
 
-## Installation:
-https://get.asdl.website/asdl-hub
+## Installation
+```bash
+curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
+```
 
 ## Status
 ASDL Hub is currently under active development.
