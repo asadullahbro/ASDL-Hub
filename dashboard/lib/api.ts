@@ -21,7 +21,9 @@ import {
   EnrollmentToken
 } from '@/types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hub.asdl.website/api/v1';
+const API_BASE = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/v1`
+    : '/api/v1';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
