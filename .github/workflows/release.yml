@@ -140,7 +140,7 @@ jobs:
           merge-multiple: true
 
       - name: Stamp version into install script
-        run: sed -i "s/^VERSION=.*/VERSION=${GITHUB_REF_NAME}/" release/install.sh
+        run: sed -i "s/^ASDL_VERSION=.*/ASDL_VERSION=${GITHUB_REF_NAME}/" release/install.sh
         
       - name: Generate checksums
         working-directory: release
