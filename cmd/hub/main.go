@@ -658,6 +658,9 @@ func main() {
 	authService := services.NewAuthService(database, jwtSecret)
 	authHandlers := handlers.NewAuthHandlers(authService)
 
+	// github handler
+	githubHandlers := handlers.NewGitHubHandlers(database)
+
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
@@ -747,6 +750,7 @@ func main() {
 		// Public — agent calls this during enrollment
 		public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
 		public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
+		public.POST("/github/webhook", githubHandlers.Webhook)
 
 		// Install script
 		router.GET("/install", func(c *gin.Context) {
@@ -1042,6 +1046,13 @@ echo "✅ Agent updated successfully"
 			operator.DELETE("/projects/:id", projectService.DeleteProject)
 
 			operator.POST("/migrations", migrationService.MigrateProject)
+
+			// Operator+ — repo listing and linking
+			operator.GET("/github/installations", githubHandlers.ListInstallations)
+			operator.GET("/github/installations/:installation_id/repos", githubHandlers.ListRepos)
+			operator.POST("/github/installations", githubHandlers.RegisterInstallation)
+			operator.POST("/github/repos", githubHandlers.LinkRepo)
+			operator.GET("/github/repos", githubHandlers.GetLinkedRepos)
 		}
 
 		// Admin only - Enrollment token management
@@ -1072,6 +1083,9 @@ echo "✅ Agent updated successfully"
 			settings.PUT("/users/:id/password", settingsHandlers.ChangePassword)
 			settings.PUT("/users/:id/role", settingsHandlers.ChangeRole)
 			settings.DELETE("/users/:id", settingsHandlers.DeleteUser)
+			// Admin only — app credentials
+			settings.GET("/github/app", githubHandlers.GetAppConfig)
+			settings.POST("/github/app", githubHandlers.ConfigureApp)
 		}
 
 		// Admin only — legacy permanent token endpoint

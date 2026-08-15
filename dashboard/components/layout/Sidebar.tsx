@@ -15,6 +15,7 @@ import {
   LogOut,
   Menu,
   X,
+  Github
 } from 'lucide-react';
 
 const navigation = [
@@ -24,6 +25,7 @@ const navigation = [
   { name: 'Migrations',  href: '/migrations', icon: ArrowLeftRight },
   { name: 'Jobs',        href: '/jobs',       icon: ListTodo },
   { name: 'Health',      href: '/health',     icon: Heart },
+  { name: 'GitHub', href: '/github', icon: Github }
 ];
 
 const bottom = [

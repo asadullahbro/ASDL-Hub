@@ -18,7 +18,10 @@ import {
   PermanentToken,
   NodeHealth,
   AllProjectsHealthResponse,
-  EnrollmentToken
+  EnrollmentToken,
+  GitHubInstallation,
+  GitHubRepo,
+  GitHubRepository
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -299,4 +302,56 @@ createEnrollmentToken: (label: string): Promise<EnrollmentToken> =>
 
 revokeEnrollmentToken: (id: string): Promise<{ revoked: boolean }> =>
   request(`/enrollment/tokens/${id}`, { method: 'DELETE' }),
+
+// ── GitHub ───────────────────────────────────────────────────────────────────
+// Add these inside the `api` object in lib/api.ts
+
+getGitHubAppConfig: (): Promise<{ configured: boolean; app_id: string }> =>
+  request('/github/app'),
+
+configureGitHubApp: (data: {
+  app_id: string;
+  private_key: string;
+  webhook_secret: string;
+}): Promise<{ configured: boolean }> =>
+  request('/github/app', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+listGitHubInstallations: (): Promise<GitHubInstallation[]> =>
+  request<GitHubInstallation[]>('/github/installations'),
+
+registerGitHubInstallation: (data: {
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+}): Promise<GitHubInstallation> =>
+  request<GitHubInstallation>('/github/installations', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+listGitHubRepos: (installationId: number): Promise<{ repositories: GitHubRepo[] }> =>
+  request<{ repositories: GitHubRepo[] }>(`/github/installations/${installationId}/repos`),
+
+linkGitHubRepo: (data: {
+  installation_id: number;
+  repo_id: number;
+  owner: string;
+  name: string;
+  default_branch?: string;
+  project_id?: string;
+}): Promise<GitHubRepository> =>
+  request<GitHubRepository>('/github/repos', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+getLinkedRepos: (projectId?: string): Promise<GitHubRepository[]> => {
+  const params = new URLSearchParams();
+  if (projectId) params.append('project_id', projectId);
+  const qs = params.toString();
+  return request<GitHubRepository[]>(`/github/repos${qs ? `?${qs}` : ''}`);
+},
 };

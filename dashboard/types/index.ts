@@ -258,3 +258,38 @@ export interface EnrollmentToken {
   created_at: string;
   used_at: string | null;
 }
+
+// Add these to your types file
+
+export interface GitHubInstallation {
+  id: string;
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: string;
+  default_branch: string;
+  private: boolean;
+  html_url: string;
+  clone_url: string;
+}
+
+export interface GitHubRepository {
+  id: string;
+  installation_id: number;
+  repo_id: number;
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string;
+  project_id: string;
+  created_at: string;
+  updated_at: string;
+}
