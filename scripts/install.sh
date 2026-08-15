@@ -571,9 +571,9 @@ main() {
     install_packages
     detect_existing
     ensure_user
-    configure_endpoint
     HUB_PORT="${HUB_PORT:-$(find_free_hub_port 8080)}"
     ok "Using Hub port: TCP $HUB_PORT"
+    configure_endpoint
     generate_secrets
     setup_database
     setup_wireguard
