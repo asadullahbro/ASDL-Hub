@@ -191,21 +191,33 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 }
 
 func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, image, sha string) error {
-	payload := &models.JobPayload{
-		Image:         image,
-		ContainerName: project.Name,
-		Operation:     "deploy",
-		Repository:    deployment.Repository,
-		LastDeployed:  time.Now(),
+	// Fetch GitHub token for private repo access
+	var setting models.Setting
+	gitToken := ""
+	if h.db.First(&setting, "key = ?", "github_token").Error == nil {
+		gitToken = setting.Value
 	}
+
+	repoURL := fmt.Sprintf("https://github.com/%s.git", deployment.Repository)
+	if gitToken != "" {
+		repoURL = fmt.Sprintf("https://%s@github.com/%s.git", gitToken, deployment.Repository)
+	}
+
+	command := fmt.Sprintf(
+		"cd /tmp && rm -rf %s && git clone %s %s && cd %s && docker build -t %s . && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
+		project.Name, repoURL, project.Name,
+		project.Name,
+		project.Name,
+		project.Name, project.Name,
+		project.Name, project.Name,
+	)
 
 	job := &models.Job{
 		ID:         uuid.New().String(),
 		NodeID:     project.NodeID,
 		Type:       models.JobTypeDeploy,
 		Status:     models.JobStatusPending,
-		Command:    fmt.Sprintf("docker pull %s && docker run -d --name %s %s", image, project.Name, image),
-		Payload:    payload,
+		Command:    command,
 		MaxRetries: 1,
 		CreatedAt:  time.Now(),
 	}
