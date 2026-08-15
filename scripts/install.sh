@@ -13,7 +13,7 @@ RUN_USER="asdl-hub"
 WG_INTERFACE="asdl0"
 WG_PORT_HINT="${ASDL_WG_PORT:-51820}"
 WG_PORT=""  # set by find_free_port
-HUB_PORT="${ASDL_HUB_PORT:-8080}"
+HUB_PORT="${ASDL_HUB_PORT:-}"  # set by find_free_hub_port if not specified
 DOCS_URL="https://docs.asdl.website/asdl-hub"
 
 RED='\033[0;31m'
@@ -228,6 +228,8 @@ configure_endpoint() {
     # Reuse existing config on upgrade
     if [[ -f "$INSTALL_DIR/.env" ]]; then
         existing_url="$(awk -F= '$1=="PUBLIC_URL"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+        existing_port="$(awk -F= '$1=="SERVER_PORT"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+        [[ -n "$existing_port" ]] && HUB_PORT="$existing_port"
         if [[ -n "$existing_url" ]]; then
             HUB_URL="$existing_url"
             if [[ "$HUB_URL" == https://* ]]; then
@@ -325,6 +327,16 @@ find_free_port() {
         fi
     done
     die "Could not find a free UDP port for WireGuard (tried 51820-51825)."
+}
+find_free_hub_port() {
+    local hint="${1:-8080}"
+    for port in "$hint" 8081 8082 8083 8084 8085 3000 3001; do
+        if ! ss -tlpn | grep -q ":${port} "; then
+            echo "$port"
+            return 0
+        fi
+    done
+    die "Could not find a free TCP port for ASDL Hub (tried 8080-8085, 3000-3001)."
 }
 
 setup_wireguard() {
@@ -552,6 +564,8 @@ main() {
     detect_existing
     ensure_user
     configure_endpoint
+    HUB_PORT="${HUB_PORT:-$(find_free_hub_port 8080)}"
+    ok "Using Hub port: TCP $HUB_PORT"
     generate_secrets
     setup_database
     setup_wireguard
