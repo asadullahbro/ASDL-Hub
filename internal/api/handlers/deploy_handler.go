@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -206,13 +206,13 @@ func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OID
 	containerName := strings.ToLower(project.Name)
 
 	command := fmt.Sprintf(
-    "cd /tmp && rm -rf %s && git clone %s %s && cd %s && docker build -t %s . && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
-    containerName, repoURL, containerName,
-    containerName,
-    containerName,
-    containerName, containerName,
-    containerName, containerName,
-)
+		"cd /tmp && rm -rf %s && git clone %s %s && cd %s && docker build -t %s . && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
+		containerName, repoURL, containerName,
+		containerName,
+		containerName,
+		containerName, containerName,
+		containerName, containerName,
+	)
 
 	job := &models.Job{
 		ID:         uuid.New().String(),
