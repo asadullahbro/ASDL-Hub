@@ -272,9 +272,9 @@ configure_endpoint() {
         [[ -n "${PUBLIC_IP:-}" ]] || read -r -p "Public IP (could not auto-detect): " PUBLIC_IP </dev/tty
         [[ "$PUBLIC_IP" =~ ^[0-9.]+$ ]] || die "Invalid public IP."
         HUB_HOST="$PUBLIC_IP"
-        HUB_URL="http://$PUBLIC_IP"
+        HUB_URL="http://$PUBLIC_IP:$HUB_PORT"
         USE_TLS=0
-        ok "Using public IP: $PUBLIC_IP"
+        ok "Using public IP: $PUBLIC_IP:$HUB_PORT"
     fi
 }
 
