@@ -40,11 +40,11 @@ export default function GitHubPage() {
         api.listGitHubInstallations(),
         api.getLinkedRepos(),
         api.getProjects(),
-      ]);
-      setAppConfig(config);
-      setInstallations(installs);
-      setLinkedRepos(linked);
-      setProjects(projectsData.data);
+        ]);
+        setAppConfig(config);
+        setInstallations(installs ?? []);
+        setLinkedRepos(linked ?? []);
+        setProjects(projectsData?.data ?? []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load GitHub data');
