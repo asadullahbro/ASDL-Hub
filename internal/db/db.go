@@ -35,12 +35,11 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.WireGuardPeer{},
 		&models.NodeSSHKey{},
 		&models.Project{},
-		&models.GitHubInstallation{},
-		&models.GitHubRepository{},
+		&models.RepoDeploymentRule{},
+		&models.OIDCDeployment{},
 	); err != nil {
 		return nil, err
 	}
-
 	createDefaultAdmin(db)
 
 	log.Println("✅ PostgreSQL database initialized successfully")

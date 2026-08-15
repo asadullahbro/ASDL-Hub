@@ -258,38 +258,29 @@ export interface EnrollmentToken {
   created_at: string;
   used_at: string | null;
 }
-
-// Add these to your types file
-
-export interface GitHubInstallation {
+export interface RepoDeploymentRule {
   id: string;
-  installation_id: number;
-  account_login: string;
-  account_type: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GitHubRepo {
-  id: number;
-  name: string;
-  full_name: string;
-  owner: string;
-  default_branch: string;
-  private: boolean;
-  html_url: string;
-  clone_url: string;
-}
-
-export interface GitHubRepository {
-  id: string;
-  installation_id: number;
-  repo_id: number;
-  owner: string;
-  name: string;
-  full_name: string;
-  default_branch: string;
+  repository: string;
+  repo_owner: string;
+  environment: string;
   project_id: string;
+  node_id: string;
+  enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface OIDCDeployment {
+  id: string;
+  rule_id: string;
+  repository: string;
+  environment: string;
+  sha: string;
+  ref: string;
+  workflow: string;
+  run_id: string;
+  image: string;
+  status: string;
+  error?: string;
+  created_at: string;
 }

@@ -23,6 +23,7 @@ type Config struct {
 	Server struct {
 		Port        int      `yaml:"port"`
 		VPNNetworks []string `yaml:"vpn_networks"`
+		HubURL      string
 	} `yaml:"server"`
 	Database struct {
 		Host     string `yaml:"host"`
@@ -659,7 +660,7 @@ func main() {
 	authHandlers := handlers.NewAuthHandlers(authService)
 
 	// github handler
-	githubHandlers := handlers.NewGitHubHandlers(database)
+	deployHandler := handlers.NewDeployHandler(database, cfg.Server.HubURL) // or however you access the hub URL config
 
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
@@ -750,7 +751,7 @@ func main() {
 		// Public — agent calls this during enrollment
 		public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
 		public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
-		public.POST("/github/webhook", githubHandlers.Webhook)
+		public.POST("/deploy", deployHandler.Deploy)
 
 		// Install script
 		router.GET("/install", func(c *gin.Context) {
@@ -1048,11 +1049,10 @@ echo "✅ Agent updated successfully"
 			operator.POST("/migrations", migrationService.MigrateProject)
 
 			// Operator+ — repo listing and linking
-			operator.GET("/github/installations", githubHandlers.ListInstallations)
-			operator.GET("/github/installations/:installation_id/repos", githubHandlers.ListRepos)
-			operator.POST("/github/installations", githubHandlers.RegisterInstallation)
-			operator.POST("/github/repos", githubHandlers.LinkRepo)
-			operator.GET("/github/repos", githubHandlers.GetLinkedRepos)
+			operator.GET("/deploy/rules", deployHandler.ListRules)
+			operator.POST("/deploy/rules", deployHandler.CreateRule)
+			operator.DELETE("/deploy/rules/:id", deployHandler.DeleteRule)
+			operator.GET("/deploy/history", deployHandler.ListDeployments)
 		}
 
 		// Admin only - Enrollment token management
@@ -1083,9 +1083,6 @@ echo "✅ Agent updated successfully"
 			settings.PUT("/users/:id/password", settingsHandlers.ChangePassword)
 			settings.PUT("/users/:id/role", settingsHandlers.ChangeRole)
 			settings.DELETE("/users/:id", settingsHandlers.DeleteUser)
-			// Admin only — app credentials
-			settings.GET("/github/app", githubHandlers.GetAppConfig)
-			settings.POST("/github/app", githubHandlers.ConfigureApp)
 		}
 
 		// Admin only — legacy permanent token endpoint
@@ -1138,6 +1135,7 @@ func loadConfig() *Config {
 	// Server config from env
 	cfg.Server.Port = getEnvAsInt("SERVER_PORT", 8080)
 	cfg.Server.VPNNetworks = getEnvAsStringSlice("VPN_NETWORKS", []string{"10.100.0.0/24", "127.0.0.0/8", "::1/128"})
+	cfg.Server.HubURL = getEnv("HUB_URL", "")
 
 	// Database config from env
 	cfg.Database.Host = getEnv("DB_HOST", "localhost")

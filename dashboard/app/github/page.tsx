@@ -2,154 +2,128 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { GitHubInstallation, GitHubRepo, GitHubRepository, Project } from '../../types';
-import { Github, Link, RefreshCw, Settings, ChevronDown, ChevronRight } from 'lucide-react';
+import { RepoDeploymentRule, OIDCDeployment, Project, Node } from '../../types';
+import { Github, RefreshCw, Trash2, Plus, X } from 'lucide-react';
+
+function statusDot(status: string) {
+  const map: Record<string, string> = {
+    dispatched: 'bg-status-green',
+    pending:    'bg-status-yellow',
+    failed:     'bg-status-red',
+  };
+  return map[status] ?? 'bg-text-muted';
+}
+
+function statusText(status: string) {
+  const map: Record<string, string> = {
+    dispatched: 'text-status-green',
+    pending:    'text-status-yellow',
+    failed:     'text-status-red',
+  };
+  return map[status] ?? 'text-text-muted';
+}
+
+function shortSHA(sha: string) {
+  return sha?.slice(0, 7) ?? '—';
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 export default function GitHubPage() {
-  const [appConfig, setAppConfig] = useState<{ configured: boolean; app_id: string } | null>(null);
-  const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
-  const [linkedRepos, setLinkedRepos] = useState<GitHubRepository[]>([]);
+  const [rules, setRules] = useState<RepoDeploymentRule[]>([]);
+  const [history, setHistory] = useState<OIDCDeployment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // App config form
-  const [showAppForm, setShowAppForm] = useState(false);
-  const [appForm, setAppForm] = useState({ app_id: '', private_key: '', webhook_secret: '' });
-  const [savingApp, setSavingApp] = useState(false);
-
-  // Installation form
-  const [showInstallForm, setShowInstallForm] = useState(false);
-  const [installForm, setInstallForm] = useState({ installation_id: '', account_login: '', account_type: 'User' });
-  const [savingInstall, setSavingInstall] = useState(false);
-
-  // Repo browser
-  const [selectedInstallation, setSelectedInstallation] = useState<GitHubInstallation | null>(null);
-  const [availableRepos, setAvailableRepos] = useState<GitHubRepo[]>([]);
-  const [loadingRepos, setLoadingRepos] = useState(false);
-
-  // Link repo form
-  const [linkingRepo, setLinkingRepo] = useState<GitHubRepo | null>(null);
-  const [linkForm, setLinkForm] = useState({ project_id: '', default_branch: '' });
-  const [savingLink, setSavingLink] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    repository: '',
+    environment: 'production',
+    project_id: '',
+    node_id: '',
+  });
 
   async function loadData() {
     try {
-      const [config, installs, linked, projectsData] = await Promise.all([
-        api.getGitHubAppConfig(),
-        api.listGitHubInstallations(),
-        api.getLinkedRepos(),
+      const [rulesData, historyData, projectsData, nodesData] = await Promise.all([
+        api.listDeployRules(),
+        api.listDeployHistory(),
         api.getProjects(),
-        ]);
-        setAppConfig(config);
-        setInstallations(installs ?? []);
-        setLinkedRepos(linked ?? []);
-        setProjects(projectsData?.data ?? []);
+        api.getNodes(),
+      ]);
+      setRules(rulesData ?? []);
+      setHistory(historyData ?? []);
+      setProjects(projectsData?.data ?? []);
+      setNodes(nodesData ?? []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load GitHub data');
+      setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
-  const handleSaveApp = async () => {
-    setSavingApp(true);
+  const handleCreate = async () => {
+    setSaving(true);
     try {
-      await api.configureGitHubApp(appForm);
-      setShowAppForm(false);
-      setAppForm({ app_id: '', private_key: '', webhook_secret: '' });
+      await api.createDeployRule(form);
+      setShowForm(false);
+      setForm({ repository: '', environment: 'production', project_id: '', node_id: '' });
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to configure app');
+      setError(err instanceof Error ? err.message : 'Failed to create rule');
     } finally {
-      setSavingApp(false);
+      setSaving(false);
     }
   };
 
-  const handleRegisterInstallation = async () => {
-    setSavingInstall(true);
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
     try {
-      await api.registerGitHubInstallation({
-        installation_id: parseInt(installForm.installation_id),
-        account_login: installForm.account_login,
-        account_type: installForm.account_type,
-      });
-      setShowInstallForm(false);
-      setInstallForm({ installation_id: '', account_login: '', account_type: 'User' });
+      await api.deleteDeployRule(id);
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to register installation');
+      setError(err instanceof Error ? err.message : 'Failed to delete rule');
     } finally {
-      setSavingInstall(false);
+      setDeletingId(null);
     }
   };
 
-  const handleBrowseRepos = async (installation: GitHubInstallation) => {
-    if (selectedInstallation?.id === installation.id) {
-      setSelectedInstallation(null);
-      setAvailableRepos([]);
-      return;
-    }
-    setSelectedInstallation(installation);
-    setLoadingRepos(true);
-    try {
-      const result = await api.listGitHubRepos(installation.installation_id);
-      setAvailableRepos(result.repositories);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load repositories');
-    } finally {
-      setLoadingRepos(false);
-    }
-  };
+  const getProjectName = (id: string) => projects.find(p => p.id === id)?.name ?? id;
+  const getNodeName   = (id: string) => nodes.find(n => n.id === id)?.hostname ?? id;
 
-  const handleLinkRepo = async () => {
-    if (!linkingRepo || !selectedInstallation) return;
-    setSavingLink(true);
-    try {
-      await api.linkGitHubRepo({
-        installation_id: selectedInstallation.installation_id,
-        repo_id: linkingRepo.id,
-        owner: linkingRepo.owner,
-        name: linkingRepo.name,
-        default_branch: linkForm.default_branch || linkingRepo.default_branch,
-        project_id: linkForm.project_id || undefined,
-      });
-      setLinkingRepo(null);
-      setLinkForm({ project_id: '', default_branch: '' });
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to link repository');
-    } finally {
-      setSavingLink(false);
-    }
-  };
-
-  const isRepoLinked = (repoId: number) =>
-    linkedRepos.some(r => r.repo_id === repoId);
-
-  const getProjectName = (projectId: string) =>
-    projects.find(p => p.id === projectId)?.name ?? 'Unknown';
+  const formValid = form.repository.includes('/') && form.environment && form.project_id && form.node_id;
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted">Loading GitHub integration...</div>
+        <div className="text-text-muted text-sm">Loading...</div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Github className="h-5 w-5 text-text-primary" />
-          <h1 className="text-xl font-semibold text-text-primary">GitHub</h1>
+          <h1 className="text-xl font-semibold text-text-primary">GitHub Actions</h1>
         </div>
         <button
           onClick={loadData}
@@ -161,343 +135,224 @@ export default function GitHubPage() {
       </div>
 
       {error && (
-        <div className="bg-status-red/10 border border-status-red/30 rounded-lg px-4 py-3 text-sm text-status-red">
-          {error}
+        <div className="bg-status-red/10 border border-status-red/30 rounded-lg px-4 py-3 text-sm text-status-red flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-3 hover:opacity-70 transition-opacity">
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
-      {/* App Configuration */}
+      {/* Deployment Rules */}
       <div className="bg-surface border border-border rounded-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-text-muted" />
-            <span className="text-sm font-medium text-text-primary">GitHub App</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className={`h-2 w-2 rounded-full ${appConfig?.configured ? 'bg-status-green' : 'bg-text-muted'}`} />
-            <span className="text-xs text-text-muted">
-              {appConfig?.configured ? `App ID: ${appConfig.app_id}` : 'Not configured'}
-            </span>
-            <button
-              onClick={() => setShowAppForm(!showAppForm)}
-              className="text-xs text-accent hover:text-accent-hover transition-colors"
-            >
-              {showAppForm ? 'Cancel' : appConfig?.configured ? 'Reconfigure' : 'Configure'}
-            </button>
-          </div>
-        </div>
-
-        {showAppForm && (
-          <div className="p-5 space-y-4">
-            <p className="text-xs text-text-muted">
-              Create a GitHub App at{' '}
-              <a
-                href="https://github.com/settings/apps/new"
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline"
-              >
-                github.com/settings/apps/new
-              </a>{' '}
-              then paste the credentials below.
+          <div>
+            <span className="text-sm font-medium text-text-primary">Deployment Rules</span>
+            <p className="text-xs text-text-muted mt-0.5">
+              Authorize a GitHub repo to deploy to a project via OIDC — no secrets needed.
             </p>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">App ID</label>
-              <input
-                type="text"
-                value={appForm.app_id}
-                onChange={e => setAppForm(f => ({ ...f, app_id: e.target.value }))}
-                placeholder="123456"
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Private Key (PEM)</label>
-              <textarea
-                value={appForm.private_key}
-                onChange={e => setAppForm(f => ({ ...f, private_key: e.target.value }))}
-                placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                rows={6}
-                className="w-full bg-background border border-border rounded px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-accent font-mono resize-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Webhook Secret</label>
-              <input
-                type="password"
-                value={appForm.webhook_secret}
-                onChange={e => setAppForm(f => ({ ...f, webhook_secret: e.target.value }))}
-                placeholder="your-webhook-secret"
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-              />
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowAppForm(false)}
-                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveApp}
-                disabled={savingApp || !appForm.app_id || !appForm.private_key || !appForm.webhook_secret}
-                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {savingApp ? 'Saving...' : 'Save'}
-              </button>
-            </div>
           </div>
-        )}
-      </div>
-
-      {/* Installations */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <span className="text-sm font-medium text-text-primary">Installations</span>
-          {appConfig?.configured && (
-            <button
-              onClick={() => setShowInstallForm(!showInstallForm)}
-              className="text-xs text-accent hover:text-accent-hover transition-colors"
-            >
-              {showInstallForm ? 'Cancel' : '+ Add Installation'}
-            </button>
-          )}
+          <button
+            onClick={() => setShowForm(f => !f)}
+            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
+          >
+            {showForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add Rule</>}
+          </button>
         </div>
 
-        {showInstallForm && (
+        {/* Create form */}
+        {showForm && (
           <div className="p-5 border-b border-border space-y-4">
-            <p className="text-xs text-text-muted">
-              Install the GitHub App on your account or org, then paste the installation ID here.
-              Find it in the App's installation URL:{' '}
-              <span className="font-mono text-text-secondary">github.com/settings/installations/{'<id>'}</span>
-            </p>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-text-muted mb-1">Installation ID</label>
+                <label className="block text-xs text-text-muted mb-1">Repository</label>
                 <input
                   type="text"
-                  value={installForm.installation_id}
-                  onChange={e => setInstallForm(f => ({ ...f, installation_id: e.target.value }))}
-                  placeholder="12345678"
+                  value={form.repository}
+                  onChange={e => setForm(f => ({ ...f, repository: e.target.value }))}
+                  placeholder="owner/repo"
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
                 />
               </div>
               <div>
-                <label className="block text-xs text-text-muted mb-1">Account Login</label>
+                <label className="block text-xs text-text-muted mb-1">Environment</label>
                 <input
                   type="text"
-                  value={installForm.account_login}
-                  onChange={e => setInstallForm(f => ({ ...f, account_login: e.target.value }))}
-                  placeholder="asadullahbro"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                  value={form.environment}
+                  onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
+                  placeholder="production"
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
                 />
               </div>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Account Type</label>
-              <select
-                value={installForm.account_type}
-                onChange={e => setInstallForm(f => ({ ...f, account_type: e.target.value }))}
-                className="bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-              >
-                <option value="User">User</option>
-                <option value="Organization">Organization</option>
-              </select>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Project</label>
+                <select
+                  value={form.project_id}
+                  onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                >
+                  <option value="">— Select project —</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Target Node</label>
+                <select
+                  value={form.node_id}
+                  onChange={e => setForm(f => ({ ...f, node_id: e.target.value }))}
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                >
+                  <option value="">— Select node —</option>
+                  {nodes.map(n => <option key={n.id} value={n.id}>{n.hostname}</option>)}
+                </select>
+              </div>
             </div>
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setShowInstallForm(false)}
+                onClick={() => setShowForm(false)}
                 className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
               >
                 Cancel
               </button>
               <button
-                onClick={handleRegisterInstallation}
-                disabled={savingInstall || !installForm.installation_id || !installForm.account_login}
+                onClick={handleCreate}
+                disabled={saving || !formValid}
                 className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
               >
-                {savingInstall ? 'Registering...' : 'Register'}
+                {saving ? 'Saving...' : 'Save Rule'}
               </button>
             </div>
           </div>
         )}
 
-        {installations.length === 0 ? (
-          <div className="px-5 py-10 text-center">
-            <p className="text-sm text-text-muted">No installations registered</p>
+        {rules.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <p className="text-sm text-text-muted">No rules configured</p>
             <p className="text-xs text-text-secondary mt-1">
-              {appConfig?.configured
-                ? 'Install the GitHub App and add the installation above'
-                : 'Configure the GitHub App first'}
+              Add a rule to let a GitHub workflow deploy via OIDC token — no long-lived secrets.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {installations.map(installation => (
-              <div key={installation.id}>
-                <div
-                  className="flex items-center justify-between px-5 py-3.5 hover:bg-surface-hover transition-colors cursor-pointer"
-                  onClick={() => handleBrowseRepos(installation)}
-                >
-                  <div className="flex items-center gap-3">
-                    {selectedInstallation?.id === installation.id
-                      ? <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
-                      : <ChevronRight className="h-3.5 w-3.5 text-text-muted" />
-                    }
-                    <div>
-                      <span className="text-sm text-text-primary font-medium">{installation.account_login}</span>
-                      <span className="ml-2 text-xs text-text-muted">{installation.account_type}</span>
-                    </div>
-                  </div>
-                  <span className="text-xs text-text-muted font-mono">#{installation.installation_id}</span>
-                </div>
-
-                {/* Repo browser */}
-                {selectedInstallation?.id === installation.id && (
-                  <div className="border-t border-border bg-background">
-                    {loadingRepos ? (
-                      <div className="px-8 py-6 text-xs text-text-muted">Loading repositories...</div>
-                    ) : availableRepos.length === 0 ? (
-                      <div className="px-8 py-6 text-xs text-text-muted">No repositories accessible</div>
-                    ) : (
-                      <div className="divide-y divide-border">
-                        {availableRepos.map(repo => {
-                          const linked = isRepoLinked(repo.id);
-                          const linkedEntry = linkedRepos.find(r => r.repo_id === repo.id);
-                          return (
-                            <div key={repo.id} className="flex items-center justify-between px-8 py-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-text-primary">{repo.name}</span>
-                                  {repo.private && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">
-                                      private
-                                    </span>
-                                  )}
-                                  {linked && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 border border-accent/20 text-accent">
-                                      linked
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-3 mt-0.5">
-                                  <span className="text-xs text-text-muted font-mono">{repo.default_branch}</span>
-                                  {linked && linkedEntry?.project_id && (
-                                    <span className="text-xs text-text-muted">
-                                      → {getProjectName(linkedEntry.project_id)}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setLinkingRepo(repo);
-                                  setLinkForm({ project_id: linkedEntry?.project_id ?? '', default_branch: repo.default_branch });
-                                }}
-                                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-accent transition-colors flex-shrink-0 ml-4"
-                              >
-                                <Link className="h-3 w-3" />
-                                {linked ? 'Relink' : 'Link'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
+            {rules.map(rule => (
+              <div key={rule.id} className="flex items-center justify-between px-5 py-3.5 group">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-text-primary font-mono">{rule.repository}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border text-text-muted font-mono">
+                      {rule.environment}
+                    </span>
+                    {!rule.enabled && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 border border-status-red/20 text-status-red">
+                        disabled
+                      </span>
                     )}
                   </div>
-                )}
+                  <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
+                    <span>→ {getProjectName(rule.project_id)}</span>
+                    <span className="text-border">·</span>
+                    <span>{getNodeName(rule.node_id)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDelete(rule.id)}
+                  disabled={deletingId === rule.id}
+                  className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
+                  title="Remove rule"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Linked Repos */}
-      {linkedRepos.length > 0 && (
-        <div className="bg-surface border border-border rounded-lg">
-          <div className="px-5 py-4 border-b border-border">
-            <span className="text-sm font-medium text-text-primary">Linked Repositories</span>
+      {/* Deployment History */}
+      <div className="bg-surface border border-border rounded-lg">
+        <div className="px-5 py-4 border-b border-border">
+          <span className="text-sm font-medium text-text-primary">Deployment History</span>
+        </div>
+
+        {history.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <p className="text-sm text-text-muted">No deployments yet</p>
+            <p className="text-xs text-text-secondary mt-1">
+              Deployments triggered from GitHub Actions will appear here.
+            </p>
           </div>
+        ) : (
           <div className="divide-y divide-border">
-            {linkedRepos.map(repo => (
-              <div key={repo.id} className="flex items-center justify-between px-5 py-3.5">
-                <div>
-                  <div className="text-sm text-text-primary">{repo.full_name}</div>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className="text-xs text-text-muted font-mono">{repo.default_branch}</span>
-                    {repo.project_id && (
-                      <span className="text-xs text-text-muted">
-                        → {getProjectName(repo.project_id)}
+            {history.map(d => (
+              <div key={d.id} className="flex items-center justify-between px-5 py-3.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`h-2 w-2 rounded-full flex-shrink-0 ${statusDot(d.status)}`} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-text-primary font-mono truncate">{d.repository}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border text-text-muted font-mono flex-shrink-0">
+                        {d.environment}
                       </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
+                      <span className={statusText(d.status)}>{d.status}</span>
+                      <span className="text-border">·</span>
+                      <span className="font-mono">{shortSHA(d.sha)}</span>
+                      <span className="text-border">·</span>
+                      <span className="font-mono truncate max-w-[200px]">{d.image}</span>
+                    </div>
+                    {d.error && (
+                      <div className="mt-1 text-xs text-status-red font-mono truncate max-w-sm">
+                        {d.error}
+                      </div>
                     )}
                   </div>
                 </div>
-                <span className="text-xs text-text-muted font-mono">#{repo.repo_id}</span>
+                <div className="flex-shrink-0 text-xs text-text-muted ml-4">
+                  {timeAgo(d.created_at)}
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Link Repo Modal */}
-      {linkingRepo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-surface border border-border rounded-lg w-full max-w-md">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-              <h3 className="font-medium text-text-primary">Link Repository</h3>
-              <button
-                onClick={() => setLinkingRepo(null)}
-                className="text-text-muted hover:text-text-primary transition-colors p-1"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="bg-background border border-border rounded px-3 py-2">
-                <div className="text-sm text-text-primary">{linkingRepo.full_name}</div>
-                <div className="text-xs text-text-muted font-mono mt-0.5">{linkingRepo.clone_url}</div>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Branch</label>
-                <input
-                  type="text"
-                  value={linkForm.default_branch}
-                  onChange={e => setLinkForm(f => ({ ...f, default_branch: e.target.value }))}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Link to Project (optional)</label>
-                <select
-                  value={linkForm.project_id}
-                  onChange={e => setLinkForm(f => ({ ...f, project_id: e.target.value }))}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                >
-                  <option value="">— No project —</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
-              <button
-                onClick={() => setLinkingRepo(null)}
-                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleLinkRepo}
-                disabled={savingLink}
-                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {savingLink ? 'Linking...' : 'Link Repository'}
-              </button>
-            </div>
-          </div>
+      {/* Workflow snippet */}
+      <div className="bg-surface border border-border rounded-lg">
+        <div className="px-5 py-4 border-b border-border">
+          <span className="text-sm font-medium text-text-primary">Workflow Setup</span>
+          <p className="text-xs text-text-muted mt-0.5">Add this step to your GitHub Actions workflow.</p>
         </div>
-      )}
+        <div className="p-5">
+          <pre className="bg-background border border-border rounded p-4 text-xs text-text-secondary font-mono overflow-x-auto leading-relaxed">{`permissions:
+  contents: read
+  id-token: write
+
+steps:
+  - name: Get OIDC token
+    id: oidc
+    run: |
+      TOKEN=$(curl -sSL \\
+        -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \\
+        -H "Accept: application/json; api-version=2.0" \\
+        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=\${HUB_URL}" \\
+        | jq -r '.value')
+      echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+  - name: Deploy to ASDL Hub
+    run: |
+      curl -sSf -X POST \${HUB_URL}/api/v1/deploy \\
+        -H "Content-Type: application/json" \\
+        -d '{
+          "oidc_token":  "\${{ steps.oidc.outputs.token }}",
+          "project":     "myapp",
+          "environment": "production",
+          "image":       "registry.example.com/myapp:\${{ github.sha }}"
+        }'`}
+          </pre>
+        </div>
+      </div>
+
     </div>
   );
 }
