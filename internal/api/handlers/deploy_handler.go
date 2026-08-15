@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -202,15 +203,16 @@ func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OID
 	if gitToken != "" {
 		repoURL = fmt.Sprintf("https://%s@github.com/%s.git", gitToken, deployment.Repository)
 	}
+	containerName := strings.ToLower(project.Name)
 
 	command := fmt.Sprintf(
-		"cd /tmp && rm -rf %s && git clone %s %s && cd %s && docker build -t %s . && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
-		project.Name, repoURL, project.Name,
-		project.Name,
-		project.Name,
-		project.Name, project.Name,
-		project.Name, project.Name,
-	)
+    "cd /tmp && rm -rf %s && git clone %s %s && cd %s && docker build -t %s . && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
+    containerName, repoURL, containerName,
+    containerName,
+    containerName,
+    containerName, containerName,
+    containerName, containerName,
+)
 
 	job := &models.Job{
 		ID:         uuid.New().String(),
