@@ -143,9 +143,9 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 	err := h.db.First(&project, "repository = ?", claims.Repository).Error
 	if err == nil {
 		h.db.Model(&project).Updates(map[string]interface{}{
-			"image":        image,
+			"image":         image,
 			"last_deployed": time.Now(),
-			"updated_at":   time.Now(),
+			"updated_at":    time.Now(),
 		})
 		return &project, nil
 	}
