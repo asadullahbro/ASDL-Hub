@@ -70,7 +70,7 @@ func (h *TerminalHandlers) Terminal(c *gin.Context) {
 	defer session.Client.Close()
 	defer session.Session.Close()
 
-	ws.WriteMessage(websocket.TextMessage, []byte("\r\n✅ Connected to node\r\n"))
+	ws.WriteMessage(websocket.TextMessage, []byte("\r\n✅  Connected to node\r\n"))
 
 	done := make(chan struct{})
 

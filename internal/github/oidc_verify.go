@@ -2,7 +2,6 @@ package github
 
 import (
 	"crypto"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -32,17 +31,4 @@ func verifyRS256(rawToken string, pub *rsa.PublicKey) error {
 	}
 
 	return nil
-}
-
-// signRS256 is provided for testing purposes only — not used in production.
-func signRS256(header, payload string, priv *rsa.PrivateKey) (string, error) {
-	signingInput := header + "." + payload
-	digest := sha256.Sum256([]byte(signingInput))
-
-	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }

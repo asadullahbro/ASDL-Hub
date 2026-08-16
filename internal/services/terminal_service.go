@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -136,15 +135,4 @@ func (s *TerminalService) OpenSession(nodeID string) (*SSHSession, error) {
 
 func (s *TerminalService) ResizeTerminal(session *ssh.Session, rows, cols uint32) error {
 	return session.WindowChange(int(rows), int(cols))
-}
-
-// isNodeReachable does a quick TCP check before attempting SSH
-func isNodeReachable(ip string, port int) bool {
-	addr := fmt.Sprintf("%s:%d", ip, port)
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }

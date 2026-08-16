@@ -1,10 +1,8 @@
 package services
 
 import (
-	"errors"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -31,23 +29,10 @@ func NewMigrationService(db *gorm.DB, jobService *JobService, nginxService *Ngin
 }
 
 func (s *MigrationService) getGitHubToken() string {
-	// Try database first
-	var setting models.Setting
-	if err := s.db.First(&setting, "key = ?", "github_token").Error; err == nil && setting.Value != "" {
-		return setting.Value
+	var token models.GitHubToken
+	if err := s.db.First(&token).Error; err == nil && token.Token != "" {
+		return token.Token
 	}
-
-	// Fall back to file
-	data, err := os.ReadFile("/etc/asdl/github.env")
-	if err == nil {
-		lines := strings.Split(string(data), "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "GITHUB_TOKEN=") {
-				return strings.TrimPrefix(line, "GITHUB_TOKEN=")
-			}
-		}
-	}
-
 	return ""
 }
 
@@ -73,6 +58,7 @@ func (s *MigrationService) cleanupStuckMigrations() {
 		s.db.Save(&migration)
 	}
 }
+
 func (s *MigrationService) MigrateToNode(projectID, targetNodeID string) {
 	var project models.Project
 	if err := s.db.First(&project, "id = ?", projectID).Error; err != nil {
@@ -139,6 +125,30 @@ func (s *MigrationService) MigrateToNode(projectID, targetNodeID string) {
 		s.db.Create(stopJob)
 	}
 
+	// Pull image on target
+	token := s.getGitHubToken()
+	if token != "" {
+		pullJob := &models.Job{
+			ID:     uuid.New().String(),
+			NodeID: targetNode.ID,
+			Type:   models.JobTypeImagePull,
+			Status: models.JobStatusPending,
+			Payload: &models.JobPayload{
+				ContainerName: project.Name,
+				Image:         project.Image,
+				Repository:    strings.Split(project.Image, ":")[0],
+				Operation:     "pull",
+			},
+			MaxRetries: 3,
+			CreatedAt:  time.Now(),
+		}
+		if err := s.db.Create(pullJob).Error; err != nil {
+			log.Printf("⚠️ MigrateToNode: failed to create pull job: %v", err)
+			return
+		}
+		log.Printf("📥 Pull job created: %s on %s", pullJob.ID, targetNode.Hostname)
+	}
+
 	// Start on target
 	startJob := &models.Job{
 		ID:     uuid.New().String(),
@@ -152,6 +162,7 @@ func (s *MigrationService) MigrateToNode(projectID, targetNodeID string) {
 			Volumes:       project.Volumes,
 			EnvVars:       project.EnvVars,
 			Operation:     "start",
+			SourceNodeIP:  sourceNode.VPNIP,
 		},
 		MaxRetries: 3,
 		CreatedAt:  time.Now(),
@@ -184,46 +195,36 @@ func (s *MigrationService) EnforceMasterNode(masterNodeID string) {
 	if err := s.db.First(&master, "id = ?", masterNodeID).Error; err != nil {
 		return
 	}
+
+	targetNodeID := masterNodeID
+
 	if !master.Online {
-		return // master is offline, don't touch anything
+		// Master is offline, find healthiest available node
+		var healthiest models.Node
+		if err := s.db.Where("id != ? AND online = ?", masterNodeID, true).
+			Order("health_score DESC").
+			First(&healthiest).Error; err != nil {
+			log.Printf("⚠️ EnforceMasterNode: no available nodes to migrate to")
+			return
+		}
+		log.Printf("⚠️ Master offline, falling back to healthiest node: %s", healthiest.Hostname)
+		targetNodeID = healthiest.ID
 	}
 
-	// Find all projects NOT on master node
 	var projects []models.Project
-	s.db.Where("node_id != ? AND health_status != ?", masterNodeID, "migrating").Find(&projects)
+	s.db.Where("node_id != ? AND health_status != ?", targetNodeID, "migrating").Find(&projects)
 
 	for _, project := range projects {
-		log.Printf("Master node enforcement: migrating %s to %s", project.Name, master.Hostname)
-		go s.MigrateToNode(project.ID, masterNodeID)
+		log.Printf("Master node enforcement: migrating %s to %s", project.Name, targetNodeID)
+		go s.MigrateToNode(project.ID, targetNodeID)
 	}
-}
-func (s *MigrationService) pickTargetNode(excludeNodeID string) (*models.Node, error) {
-	// Check master node first
-	var setting models.Setting
-	if err := s.db.First(&setting, "key = ?", "master_node_id").Error; err == nil {
-		masterID := setting.Value
-		if masterID != excludeNodeID {
-			var master models.Node
-			if err := s.db.First(&master, "id = ? AND online = ?", masterID, true).Error; err == nil {
-				return &master, nil
-			}
-		}
-	}
-
-	// Fall back to healthiest available node
-	var node models.Node
-	if err := s.db.Where("id != ? AND online = ?", excludeNodeID, true).
-		Order("health_score DESC").
-		First(&node).Error; err != nil {
-		return nil, errors.New("no available target node")
-	}
-	return &node, nil
 }
 
 func (s *MigrationService) MigrateProject(c *gin.Context) {
 	var req struct {
-		ProjectID    string `json:"project_id" binding:"required"`
+		ProjectID    string `json:"project_id"     binding:"required"`
 		TargetNodeID string `json:"target_node_id" binding:"required"`
+		Image        string `json:"image"` // optional, updates if provided
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -235,6 +236,14 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 	if err := s.db.First(&project, "id = ?", req.ProjectID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
+	}
+
+	if req.Image != "" {
+		project.Image = req.Image
+		if err := s.db.Model(&project).Update("image", req.Image).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update project image"})
+			return
+		}
 	}
 
 	var sourceNode models.Node
@@ -286,7 +295,6 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 		return
 	}
 
-	// Create jobs with payload
 	var stopJobID string
 
 	// Step 1: Stop on source (if online)
@@ -322,7 +330,7 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 			Payload: &models.JobPayload{
 				ContainerName: project.Name,
 				Image:         project.Image,
-				Repository:    "ghcr.io/asadullahbro/simplebanking",
+				Repository:    strings.Split(project.Image, ":")[0],
 				Operation:     "pull",
 			},
 			MaxRetries: 3,
@@ -348,6 +356,7 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 			Volumes:       project.Volumes,
 			EnvVars:       project.EnvVars,
 			Operation:     "start",
+			SourceNodeIP:  sourceNode.VPNIP,
 		},
 		MaxRetries: 3,
 		CreatedAt:  time.Now(),
@@ -366,7 +375,6 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 	migration.Status = models.MigrationStatusRunning
 	s.db.Save(&migration)
 
-	// Update Nginx
 	if err := s.nginxService.UpdateNginxConfig(); err != nil {
 		log.Printf("⚠️ Failed to update Nginx config: %v", err)
 	}
