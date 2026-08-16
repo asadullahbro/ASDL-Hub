@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { AllowedRepo, OIDCDeployment, Project } from '../../types';
-import { Github, RefreshCw, X, Plus, Trash2 } from 'lucide-react';
+import { AllowedRepo, GitHubToken, OIDCDeployment } from '../../types';
+import { Github, RefreshCw, X, Plus, Trash2, Key } from 'lucide-react';
+
+const hubUrl = typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+  ? window.location.origin
+  : process.env.NEXT_PUBLIC_HUB_URL || 'https://your-hub-url';
 
 function statusDot(status: string) {
   const map: Record<string, string> = {
@@ -38,34 +42,30 @@ function timeAgo(dateStr: string) {
 }
 
 export default function GitHubPage() {
-  const [allowed, setAllowed]   = useState<AllowedRepo[]>([]);
-  const [history, setHistory]   = useState<OIDCDeployment[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
+  const [allowed, setAllowed]     = useState<AllowedRepo[]>([]);
+  const [tokens, setTokens]       = useState<GitHubToken[]>([]);
+  const [history, setHistory]     = useState<OIDCDeployment[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
 
-  const [showForm, setShowForm]   = useState(false);
-  const [saving, setSaving]       = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    repository:  '',
-    environment: 'production',
-    project_id:  '',
-  });
-  const hubUrl = typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
-  ? window.location.origin
-  : 'https://your-hub-url';
+  const [showRepoForm, setShowRepoForm]   = useState(false);
+  const [showTokenForm, setShowTokenForm] = useState(false);
+  const [saving, setSaving]               = useState(false);
+  const [deletingId, setDeletingId]       = useState<string | null>(null);
+
+  const [repoForm, setRepoForm] = useState({ repository: '', environment: 'production' });
+  const [tokenForm, setTokenForm] = useState({ label: '', token: '' });
 
   async function loadData() {
     try {
-      const [allowedData, historyData, projectsData] = await Promise.all([
+      const [allowedData, tokensData, historyData] = await Promise.all([
         api.listAllowed(),
+        api.listGitHubTokens(),
         api.listDeployHistory(),
-        api.getProjects(),
       ]);
       setAllowed(allowedData ?? []);
+      setTokens(tokensData ?? []);
       setHistory(historyData ?? []);
-      setProjects(projectsData?.data ?? []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -76,12 +76,12 @@ export default function GitHubPage() {
 
   useEffect(() => { loadData(); }, []);
 
-  const handleAdd = async () => {
+  const handleAddRepo = async () => {
     setSaving(true);
     try {
-      await api.addAllowed(form);
-      setShowForm(false);
-      setForm({ repository: '', environment: 'production', project_id: '' });
+      await api.addAllowed(repoForm);
+      setShowRepoForm(false);
+      setRepoForm({ repository: '', environment: 'production' });
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add');
@@ -90,7 +90,21 @@ export default function GitHubPage() {
     }
   };
 
-  const handleRemove = async (id: string) => {
+  const handleAddToken = async () => {
+    setSaving(true);
+    try {
+      await api.addGitHubToken(tokenForm);
+      setShowTokenForm(false);
+      setTokenForm({ label: '', token: '' });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add token');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveRepo = async (id: string) => {
     setDeletingId(id);
     try {
       await api.removeAllowed(id);
@@ -102,11 +116,20 @@ export default function GitHubPage() {
     }
   };
 
-  const getProjectName = (id: string) =>
-    projects.find(p => p.id === id)?.name ?? id.slice(0, 8);
+  const handleRemoveToken = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await api.removeGitHubToken(id);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove token');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
-  const formValid =
-    form.repository.includes('/') && form.environment && form.project_id;
+  const repoFormValid = repoForm.repository.includes('/') && repoForm.environment;
+  const tokenFormValid = tokenForm.label && tokenForm.token;
 
   if (loading) {
     return (
@@ -143,34 +166,32 @@ export default function GitHubPage() {
         </div>
       )}
 
-      {/* Allowed Repos */}
+      {/* Authorized Repositories */}
       <div className="bg-surface border border-border rounded-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
             <span className="text-sm font-medium text-text-primary">Authorized Repositories</span>
             <p className="text-xs text-text-muted mt-0.5">
-              Only listed repositories can deploy via OIDC. Node selection is handled automatically.
+              Only listed repositories can deploy. Projects are created automatically on first deploy.
             </p>
           </div>
           <button
-            onClick={() => setShowForm(f => !f)}
+            onClick={() => setShowRepoForm(f => !f)}
             className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
           >
-            {showForm
-              ? <><X className="h-3 w-3" /> Cancel</>
-              : <><Plus className="h-3 w-3" /> Add</>}
+            {showRepoForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add</>}
           </button>
         </div>
 
-        {showForm && (
+        {showRepoForm && (
           <div className="p-5 border-b border-border space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs text-text-muted mb-1">Repository</label>
                 <input
                   type="text"
-                  value={form.repository}
-                  onChange={e => setForm(f => ({ ...f, repository: e.target.value }))}
+                  value={repoForm.repository}
+                  onChange={e => setRepoForm(f => ({ ...f, repository: e.target.value }))}
                   placeholder="owner/repo"
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
                 />
@@ -179,36 +200,23 @@ export default function GitHubPage() {
                 <label className="block text-xs text-text-muted mb-1">Environment</label>
                 <input
                   type="text"
-                  value={form.environment}
-                  onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
+                  value={repoForm.environment}
+                  onChange={e => setRepoForm(f => ({ ...f, environment: e.target.value }))}
                   placeholder="production"
                   className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
                 />
               </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Project</label>
-                <select
-                  value={form.project_id}
-                  onChange={e => setForm(f => ({ ...f, project_id: e.target.value }))}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                >
-                  <option value="">— Select project —</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
             </div>
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setShowForm(false)}
+                onClick={() => setShowRepoForm(false)}
                 className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAdd}
-                disabled={saving || !formValid}
+                onClick={handleAddRepo}
+                disabled={saving || !repoFormValid}
                 className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Authorize'}
@@ -218,10 +226,10 @@ export default function GitHubPage() {
         )}
 
         {allowed.length === 0 ? (
-          <div className="px-5 py-12 text-center">
+          <div className="px-5 py-10 text-center">
             <p className="text-sm text-text-muted">No repositories authorized</p>
             <p className="text-xs text-text-secondary mt-1">
-              Add a repository to allow it to deploy via GitHub Actions OIDC.
+              Add a repository to allow it to deploy via OIDC.
             </p>
           </div>
         ) : (
@@ -240,15 +248,101 @@ export default function GitHubPage() {
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-text-muted mt-0.5">
-                    → {getProjectName(r.project_id)}
+                </div>
+                <button
+                  onClick={() => handleRemoveRepo(r.id)}
+                  disabled={deletingId === r.id}
+                  className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* GitHub Tokens */}
+      <div className="bg-surface border border-border rounded-lg">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <span className="text-sm font-medium text-text-primary">GitHub Tokens</span>
+            <p className="text-xs text-text-muted mt-0.5">
+              PATs used to pull private images from GHCR on your nodes. Needs <span className="font-mono">read:packages</span> scope.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowTokenForm(f => !f)}
+            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
+          >
+            {showTokenForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add</>}
+          </button>
+        </div>
+
+        {showTokenForm && (
+          <div className="p-5 border-b border-border space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Label</label>
+                <input
+                  type="text"
+                  value={tokenForm.label}
+                  onChange={e => setTokenForm(f => ({ ...f, label: e.target.value }))}
+                  placeholder="e.g. personal, org-bot"
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Token</label>
+                <input
+                  type="password"
+                  value={tokenForm.token}
+                  onChange={e => setTokenForm(f => ({ ...f, token: e.target.value }))}
+                  placeholder="ghp_..."
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowTokenForm(false)}
+                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddToken}
+                disabled={saving || !tokenFormValid}
+                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Add Token'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tokens.length === 0 ? (
+          <div className="px-5 py-10 text-center">
+            <p className="text-sm text-text-muted">No tokens added</p>
+            <p className="text-xs text-text-secondary mt-1">
+              Add a PAT to pull private images from GHCR during deployment.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {tokens.map(t => (
+              <div key={t.id} className="flex items-center justify-between px-5 py-3.5 group">
+                <div className="flex items-center gap-3">
+                  <Key className="h-3.5 w-3.5 text-text-muted flex-shrink-0" />
+                  <div>
+                    <span className="text-sm text-text-primary">{t.label}</span>
+                    <div className="text-xs text-text-muted font-mono mt-0.5">{t.token}</div>
                   </div>
                 </div>
                 <button
-                  onClick={() => handleRemove(r.id)}
-                  disabled={deletingId === r.id}
+                  onClick={() => handleRemoveToken(t.id)}
+                  disabled={deletingId === t.id}
                   className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
-                  title="Remove"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -262,13 +356,11 @@ export default function GitHubPage() {
       <div className="bg-surface border border-border rounded-lg">
         <div className="px-5 py-4 border-b border-border">
           <span className="text-sm font-medium text-text-primary">Deployment History</span>
-          <p className="text-xs text-text-muted mt-0.5">
-            Audit log of all OIDC-authenticated deployments.
-          </p>
+          <p className="text-xs text-text-muted mt-0.5">Audit log of all OIDC-authenticated deployments.</p>
         </div>
 
         {history.length === 0 ? (
-          <div className="px-5 py-12 text-center">
+          <div className="px-5 py-10 text-center">
             <p className="text-sm text-text-muted">No deployments yet</p>
             <p className="text-xs text-text-secondary mt-1">
               Deployments triggered from GitHub Actions will appear here.
@@ -320,7 +412,7 @@ export default function GitHubPage() {
         <div className="px-5 py-4 border-b border-border">
           <span className="text-sm font-medium text-text-primary">Workflow Setup</span>
           <p className="text-xs text-text-muted mt-0.5">
-            Add this to your GitHub Actions workflow. No secrets required.
+            Add this to your GitHub Actions workflow. No secrets required beyond <span className="font-mono">GITHUB_TOKEN</span>.
           </p>
         </div>
         <div className="p-5">
@@ -368,7 +460,7 @@ jobs:
               "oidc_token": "\${{ steps.oidc.outputs.token }}",
               "image":      "\${{ steps.build.outputs.image }}"
             }'`}
-</pre>
+          </pre>
         </div>
       </div>
 

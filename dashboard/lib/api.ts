@@ -20,8 +20,8 @@ import {
   AllProjectsHealthResponse,
   EnrollmentToken,
   OIDCDeployment,
-  AllowedRepo
-
+  AllowedRepo,
+  GitHubToken
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -307,11 +307,7 @@ revokeEnrollmentToken: (id: string): Promise<{ revoked: boolean }> =>
 listAllowed: (): Promise<AllowedRepo[]> =>
   request<AllowedRepo[]>('/deploy/allowed'),
 
-addAllowed: (data: {
-  repository: string;
-  environment: string;
-  project_id: string;
-}): Promise<AllowedRepo> =>
+addAllowed: (data: { repository: string; environment: string }): Promise<AllowedRepo> =>
   request<AllowedRepo>('/deploy/allowed', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -322,4 +318,16 @@ removeAllowed: (id: string): Promise<{ deleted: boolean }> =>
 
 listDeployHistory: (): Promise<OIDCDeployment[]> =>
   request<OIDCDeployment[]>('/deploy/history'),
+
+listGitHubTokens: (): Promise<GitHubToken[]> =>
+  request<GitHubToken[]>('/deploy/tokens'),
+
+addGitHubToken: (data: { label: string; token: string }): Promise<GitHubToken> =>
+  request<GitHubToken>('/deploy/tokens', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+removeGitHubToken: (id: string): Promise<{ deleted: boolean }> =>
+  request(`/deploy/tokens/${id}`, { method: 'DELETE' }),
 };

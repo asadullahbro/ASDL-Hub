@@ -280,8 +280,14 @@ export interface AllowedRepo {
   id: string;
   repository: string;
   environment: string;
-  project_id: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface GitHubToken {
+  id: string;
+  label: string;
+  token: string;
+  created_at: string;
 }
