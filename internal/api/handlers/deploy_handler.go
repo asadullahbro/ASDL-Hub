@@ -175,7 +175,7 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		UpdatedAt:    time.Now(),
 	}
 	if err := h.db.Create(&project).Error; err != nil {
-		if err2 := h.db.First(&project, "repository = ?", claims.Repository).Error; err2 != nil {
+		if err2 := h.db.Where("repository = ?", claims.Repository).First(&project).Error; err2 != nil {
 			return nil, fmt.Errorf("failed to create or fetch project: %w", err2)
 		}
 	}
