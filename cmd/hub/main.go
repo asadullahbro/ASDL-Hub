@@ -1048,10 +1048,13 @@ echo "✅ Agent updated successfully"
 
 			operator.POST("/migrations", migrationService.MigrateProject)
 
-			// Operator+ — repo listing
+			// Operator+ — github actions
 			operator.GET("/deploy/allowed", deployHandler.ListAllowed)
 			operator.POST("/deploy/allowed", deployHandler.AddAllowed)
 			operator.DELETE("/deploy/allowed/:id", deployHandler.RemoveAllowed)
+			operator.GET("/deploy/tokens", deployHandler.ListGitHubTokens)
+			operator.POST("/deploy/tokens", deployHandler.AddGitHubToken)
+			operator.DELETE("/deploy/tokens/:id", deployHandler.RemoveGitHubToken)
 			operator.GET("/deploy/history", deployHandler.ListDeployments)
 		}
 

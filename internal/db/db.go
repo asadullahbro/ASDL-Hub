@@ -35,6 +35,8 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.WireGuardPeer{},
 		&models.NodeSSHKey{},
 		&models.Project{},
+		&models.AllowedRepo{},
+		&models.GitHubToken{},
 		&models.OIDCDeployment{},
 	); err != nil {
 		return nil, err

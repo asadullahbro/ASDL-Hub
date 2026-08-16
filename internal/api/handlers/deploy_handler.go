@@ -29,7 +29,6 @@ func NewDeployHandler(db *gorm.DB, hubAudience string) *DeployHandler {
 	}
 }
 
-// Deploy handles POST /api/v1/deploy
 func (h *DeployHandler) Deploy(c *gin.Context) {
 	var req models.DeployRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -37,7 +36,6 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// 1. Verify OIDC token
 	claims, err := h.verifier.Verify(req.OIDCToken)
 	if err != nil {
 		slog.Warn("OIDC verification failed",
@@ -54,7 +52,6 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		"workflow", claims.Workflow,
 	)
 
-	// 2. Resolve environment
 	environment := claims.Environment
 	if environment == "" {
 		environment = req.Environment
@@ -63,7 +60,7 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		environment = "production"
 	}
 
-	// 3. Authorize — look up allowed repo
+	// Authorize
 	var allowed models.AllowedRepo
 	err = h.db.First(&allowed,
 		"repository = ? AND environment = ? AND enabled = ?",
@@ -88,15 +85,15 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// 4. Load the project
-	var project models.Project
-	if err := h.db.First(&project, "id = ?", allowed.ProjectID).Error; err != nil {
-		slog.Error("project not found", "project_id", allowed.ProjectID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "project not found"})
+	// Find or create project
+	project, err := h.findOrCreateProject(claims, req.Image)
+	if err != nil {
+		slog.Error("failed to find or create project", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve project"})
 		return
 	}
 
-	// 5. Health-aware node selection for this deployment
+	// Health-aware node selection
 	node, err := h.bestNode()
 	if err != nil {
 		slog.Error("no available node", "error", err)
@@ -104,7 +101,6 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// 6. Record the OIDC deployment
 	deployment := &models.OIDCDeployment{
 		ID:          uuid.New().String(),
 		Repository:  claims.Repository,
@@ -125,8 +121,7 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// 7. Dispatch job to selected node
-	if err := h.dispatch(&project, deployment, node, req.Image, claims.SHA); err != nil {
+	if err := h.dispatch(project, deployment, node, req.Image, claims.SHA); err != nil {
 		h.markStatus(deployment.ID, "failed", err.Error())
 		slog.Error("dispatch failed", "error", err, "node_id", node.ID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to dispatch deployment"})
@@ -143,83 +138,43 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 	})
 }
 
-// ListDeployments handles GET /api/v1/deploy/history
-func (h *DeployHandler) ListDeployments(c *gin.Context) {
-	var deployments []models.OIDCDeployment
-	if err := h.db.Order("created_at desc").Limit(100).Find(&deployments).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch deployments"})
-		return
-	}
-	c.JSON(http.StatusOK, deployments)
-}
-
-// ListAllowed handles GET /api/v1/deploy/allowed
-func (h *DeployHandler) ListAllowed(c *gin.Context) {
-	var allowed []models.AllowedRepo
-	if err := h.db.Order("created_at desc").Find(&allowed).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch allowed repos"})
-		return
-	}
-	c.JSON(http.StatusOK, allowed)
-}
-
-// AddAllowed handles POST /api/v1/deploy/allowed
-func (h *DeployHandler) AddAllowed(c *gin.Context) {
-	var input struct {
-		Repository  string `json:"repository" binding:"required"`
-		Environment string `json:"environment"`
-		ProjectID   string `json:"project_id" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if !strings.Contains(input.Repository, "/") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "repository must be in owner/repo format"})
-		return
-	}
-
-	if input.Environment == "" {
-		input.Environment = "production"
-	}
-
-	// Verify project exists
+func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image string) (*models.Project, error) {
 	var project models.Project
-	if err := h.db.First(&project, "id = ?", input.ProjectID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "project not found"})
-		return
+	err := h.db.First(&project, "repository = ?", claims.Repository).Error
+	if err == nil {
+		h.db.Model(&project).Updates(map[string]interface{}{
+			"image":        image,
+			"last_deployed": time.Now(),
+			"updated_at":   time.Now(),
+		})
+		return &project, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("project lookup failed: %w", err)
 	}
 
-	allowed := models.AllowedRepo{
-		ID:          uuid.New().String(),
-		Repository:  input.Repository,
-		Environment: input.Environment,
-		ProjectID:   input.ProjectID,
-		Enabled:     true,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	_, repoName, _ := splitRepo(claims.Repository)
+
+	project = models.Project{
+		ID:           uuid.New().String(),
+		Name:         strings.ToLower(repoName),
+		Repository:   claims.Repository,
+		Image:        image,
+		Status:       "deploying",
+		HealthStatus: "unknown",
+		LastDeployed: time.Now(),
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
-	if err := h.db.Create(&allowed).Error; err != nil {
-		slog.Error("failed to create allowed repo", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create entry"})
-		return
+	if err := h.db.Create(&project).Error; err != nil {
+		// Lost the race — fetch winner's row
+		if err2 := h.db.First(&project, "repository = ?", claims.Repository).Error; err2 != nil {
+			return nil, fmt.Errorf("failed to create or fetch project: %w", err2)
+		}
 	}
-	c.JSON(http.StatusCreated, allowed)
+	return &project, nil
 }
 
-// RemoveAllowed handles DELETE /api/v1/deploy/allowed/:id
-func (h *DeployHandler) RemoveAllowed(c *gin.Context) {
-	id := c.Param("id")
-	if err := h.db.Delete(&models.AllowedRepo{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete entry"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"deleted": true})
-}
-
-// bestNode returns the online node with the highest health score.
-// Falls back to master node if configured.
 func (h *DeployHandler) bestNode() (*models.Node, error) {
 	var masterSetting models.Setting
 	if h.db.First(&masterSetting, "key = ?", "master_node_id").Error == nil && masterSetting.Value != "" {
@@ -241,17 +196,33 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, node *models.Node, image, sha string) error {
 	containerName := strings.ToLower(project.Name)
 
+	// Find a GitHub token for docker login
+	var tokens []models.GitHubToken
+	h.db.Find(&tokens)
+
+	loginCmd := ""
+	if len(tokens) > 0 {
+		// Use the first token — GHCR accepts any valid PAT with read:packages
+		loginCmd = fmt.Sprintf(
+			"echo %s | docker login ghcr.io -u x-access-token --password-stdin && ",
+			tokens[0].Token,
+		)
+	}
+
+	command := fmt.Sprintf(
+		"%sdocker pull %s && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
+		loginCmd,
+		image,
+		containerName, containerName,
+		containerName, image,
+	)
+
 	job := &models.Job{
-		ID:     uuid.New().String(),
-		NodeID: node.ID,
-		Type:   models.JobTypeDeploy,
-		Status: models.JobStatusPending,
-		Command: fmt.Sprintf(
-			"docker pull %s && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
-			image,
-			containerName, containerName,
-			containerName, image,
-		),
+		ID:         uuid.New().String(),
+		NodeID:     node.ID,
+		Type:       models.JobTypeDeploy,
+		Status:     models.JobStatusPending,
+		Command:    command,
 		MaxRetries: 1,
 		CreatedAt:  time.Now(),
 	}
@@ -293,6 +264,130 @@ func (h *DeployHandler) markStatus(id, status, errMsg string) {
 	if err := h.db.Model(&models.OIDCDeployment{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		slog.Warn("failed to update deployment status", "id", id, "status", status, "error", err)
 	}
+}
+
+// ListDeployments handles GET /api/v1/deploy/history
+func (h *DeployHandler) ListDeployments(c *gin.Context) {
+	var deployments []models.OIDCDeployment
+	if err := h.db.Order("created_at desc").Limit(100).Find(&deployments).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch deployments"})
+		return
+	}
+	c.JSON(http.StatusOK, deployments)
+}
+
+// ListAllowed handles GET /api/v1/deploy/allowed
+func (h *DeployHandler) ListAllowed(c *gin.Context) {
+	var allowed []models.AllowedRepo
+	if err := h.db.Order("created_at desc").Find(&allowed).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch allowed repos"})
+		return
+	}
+	c.JSON(http.StatusOK, allowed)
+}
+
+// AddAllowed handles POST /api/v1/deploy/allowed
+func (h *DeployHandler) AddAllowed(c *gin.Context) {
+	var input struct {
+		Repository  string `json:"repository" binding:"required"`
+		Environment string `json:"environment"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !strings.Contains(input.Repository, "/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repository must be in owner/repo format"})
+		return
+	}
+	if input.Environment == "" {
+		input.Environment = "production"
+	}
+
+	allowed := models.AllowedRepo{
+		ID:          uuid.New().String(),
+		Repository:  input.Repository,
+		Environment: input.Environment,
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := h.db.Create(&allowed).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create entry"})
+		return
+	}
+	c.JSON(http.StatusCreated, allowed)
+}
+
+// RemoveAllowed handles DELETE /api/v1/deploy/allowed/:id
+func (h *DeployHandler) RemoveAllowed(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.db.Delete(&models.AllowedRepo{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete entry"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+// ListGitHubTokens handles GET /api/v1/deploy/tokens
+func (h *DeployHandler) ListGitHubTokens(c *gin.Context) {
+	var tokens []models.GitHubToken
+	if err := h.db.Order("created_at desc").Find(&tokens).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch tokens"})
+		return
+	}
+	// Mask token value
+	for i := range tokens {
+		if len(tokens[i].Token) > 8 {
+			tokens[i].Token = tokens[i].Token[:4] + "..." + tokens[i].Token[len(tokens[i].Token)-4:]
+		}
+	}
+	c.JSON(http.StatusOK, tokens)
+}
+
+// AddGitHubToken handles POST /api/v1/deploy/tokens
+func (h *DeployHandler) AddGitHubToken(c *gin.Context) {
+	var input struct {
+		Label string `json:"label" binding:"required"`
+		Token string `json:"token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	t := models.GitHubToken{
+		ID:        uuid.New().String(),
+		Label:     input.Label,
+		Token:     input.Token,
+		CreatedAt: time.Now(),
+	}
+	if err := h.db.Create(&t).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save token"})
+		return
+	}
+	// Return masked
+	t.Token = t.Token[:4] + "..." + t.Token[len(t.Token)-4:]
+	c.JSON(http.StatusCreated, t)
+}
+
+// RemoveGitHubToken handles DELETE /api/v1/deploy/tokens/:id
+func (h *DeployHandler) RemoveGitHubToken(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.db.Delete(&models.GitHubToken{}, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func splitRepo(repo string) (owner, name string, err error) {
+	for i, c := range repo {
+		if c == '/' {
+			return repo[:i], repo[i+1:], nil
+		}
+	}
+	return "", "", fmt.Errorf("invalid repo format: %q", repo)
 }
 
 func splitJWT(token string) []string {
