@@ -143,14 +143,21 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 	err := h.db.First(&project, "repository = ?", claims.Repository).Error
 	if err == nil {
 		h.db.Model(&project).Updates(map[string]interface{}{
-			"image":         image,
+			"image":        image,
 			"last_deployed": time.Now(),
-			"updated_at":    time.Now(),
+			"updated_at":   time.Now(),
 		})
 		return &project, nil
 	}
 	if err != gorm.ErrRecordNotFound {
 		return nil, fmt.Errorf("project lookup failed: %w", err)
+	}
+
+	// Need a node for the not null constraint — bestNode() will still
+	// be called again in Deploy() for the actual job dispatch
+	node, err := h.bestNode()
+	if err != nil {
+		return nil, fmt.Errorf("no available node for project creation: %w", err)
 	}
 
 	_, repoName, _ := splitRepo(claims.Repository)
@@ -159,6 +166,7 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		ID:           uuid.New().String(),
 		Name:         strings.ToLower(repoName),
 		Repository:   claims.Repository,
+		NodeID:       node.ID,
 		Image:        image,
 		Status:       "deploying",
 		HealthStatus: "unknown",
@@ -167,7 +175,6 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		UpdatedAt:    time.Now(),
 	}
 	if err := h.db.Create(&project).Error; err != nil {
-		// Lost the race — fetch winner's row
 		if err2 := h.db.First(&project, "repository = ?", claims.Repository).Error; err2 != nil {
 			return nil, fmt.Errorf("failed to create or fetch project: %w", err2)
 		}
