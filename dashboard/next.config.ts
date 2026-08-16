@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   transpilePackages: ['xterm'],
+  env: {
+    NEXT_PUBLIC_HUB_URL: process.env.PUBLIC_URL || '',
+  },
 };
 
 export default nextConfig;

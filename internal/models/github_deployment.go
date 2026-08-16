@@ -2,8 +2,18 @@ package models
 
 import "time"
 
+type AllowedRepo struct {
+	ID          string    `gorm:"primaryKey" json:"id"`
+	Repository  string    `gorm:"uniqueIndex:idx_repo_env" json:"repository"`
+	Environment string    `gorm:"size:50;uniqueIndex:idx_repo_env" json:"environment"`
+	ProjectID   string    `gorm:"index" json:"project_id"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type OIDCDeployment struct {
-	ID          string    `json:"id" gorm:"primaryKey"`
+	ID          string    `gorm:"primaryKey" json:"id"`
 	Repository  string    `json:"repository"`
 	Environment string    `json:"environment"`
 	ProjectID   string    `json:"project_id"`

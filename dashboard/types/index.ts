@@ -275,3 +275,13 @@ export interface OIDCDeployment {
   error?: string;
   created_at: string;
 }
+
+export interface AllowedRepo {
+  id: string;
+  repository: string;
+  environment: string;
+  project_id: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
