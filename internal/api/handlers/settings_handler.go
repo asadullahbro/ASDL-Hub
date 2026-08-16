@@ -86,6 +86,7 @@ func (h *SettingsHandlers) RevokeToken(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"revoked": true})
 }
+
 // --- Master node ---
 
 func (h *SettingsHandlers) GetMasterNode(c *gin.Context) {

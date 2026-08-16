@@ -78,6 +78,7 @@ func (s *SettingsService) ListPermanentTokens() ([]models.PermanentToken, error)
 func (s *SettingsService) RevokePermanentToken(id string) error {
 	return s.db.Delete(&models.PermanentToken{}, "id = ?", id).Error
 }
+
 // --- Master node ---
 
 func (s *SettingsService) SetMasterNode(nodeID string) error {

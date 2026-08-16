@@ -14,7 +14,7 @@ import (
 )
 
 type JobService struct {
-	db                *gorm.DB
+	db *gorm.DB
 }
 
 func NewJobService(db *gorm.DB) *JobService {
@@ -22,8 +22,6 @@ func NewJobService(db *gorm.DB) *JobService {
 		db: db,
 	}
 }
-
-
 
 func (s *JobService) Create(c *gin.Context) {
 	var req struct {
@@ -144,7 +142,6 @@ func (s *JobService) Complete(c *gin.Context) {
 	now := time.Now()
 	job.CompletedAt = &now
 	s.db.Save(&job)
-
 
 	if job.Type == models.JobTypeMigrateStart || job.Type == models.JobTypeFailoverStart {
 		var migration models.Migration
