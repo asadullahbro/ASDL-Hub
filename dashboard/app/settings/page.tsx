@@ -6,7 +6,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { Node, User, PermanentToken, EnrollmentToken } from '@/types';
 
 // --- Types ---
-type Section = 'tokens' | 'github' | 'users' | 'master-node' | 'nginx' | 'agents';
+type Section = 'tokens' | 'users' | 'master-node' | 'nginx' | 'agents';
 
 // --- Sudo Modal ---
 function SudoModal({
@@ -191,8 +191,6 @@ export default function SettingsPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [tokens, setTokens] = useState<PermanentToken[]>([]);
   const [masterNode, setMasterNode] = useState<Node | null>(null);
-  const [githubSet, setGithubSet] = useState(false);
-  const [githubHint, setGithubHint] = useState('');
   const [enrollmentTokens, setEnrollmentTokens] = useState<EnrollmentToken[]>([]);
   const [enrollLabel, setEnrollLabel] = useState('');
 
@@ -206,7 +204,6 @@ export default function SettingsPage() {
   // Form state
   const [tokenName, setTokenName] = useState('');
   const [newToken, setNewToken] = useState('');
-  const [githubToken, setGithubToken] = useState('');
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', role: 'viewer' });
   const [pwTarget, setPwTarget] = useState<User | null>(null);
   const [newPw, setNewPw] = useState('');
@@ -221,13 +218,12 @@ export default function SettingsPage() {
   };
 
   const load = useCallback(async () => {
-    const [nodesRes, usersRes, tokensRes, masterRes, ghRes, enrollRes] = await Promise.allSettled([
-        api.getNodes(),
-        api.listUsers(),
-        api.listTokens(),
-        api.getMasterNode(),
-        api.getGitHubToken(),
-        api.listEnrollmentTokens(),
+    const [nodesRes, usersRes, tokensRes, masterRes, enrollRes] = await Promise.allSettled([
+    api.getNodes(),
+    api.listUsers(),
+    api.listTokens(),
+    api.getMasterNode(),
+    api.listEnrollmentTokens(),
 ]);
 
     if (enrollRes.status === 'fulfilled') setEnrollmentTokens(enrollRes.value);
@@ -235,10 +231,6 @@ export default function SettingsPage() {
     if (usersRes.status === 'fulfilled') setUsers(usersRes.value);
     if (tokensRes.status === 'fulfilled') setTokens(tokensRes.value);
     if (masterRes.status === 'fulfilled') setMasterNode(masterRes.value.master_node);
-    if (ghRes.status === 'fulfilled') {
-      setGithubSet(ghRes.value.set);
-      setGithubHint(ghRes.value.token);
-    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -250,18 +242,7 @@ export default function SettingsPage() {
     setTokens(prev => [res.meta, ...prev]);
     setTokenName('');
     setSudo(null);
-  };
-
-  // --- GitHub token ---
-  const handleSetGitHub = async (password: string) => {
-    await api.setGitHubToken(githubToken, password);
-    setGithubSet(true);
-    setGithubHint('••••••••' + githubToken.slice(-4));
-    setGithubToken('');
-    setModal(null);
-    setSudo(null);
-    toast('ok', 'GitHub token saved');
-  };
+  }
 
   // --- Users ---
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -479,28 +460,6 @@ export default function SettingsPage() {
         </div>
       </SectionCard>
 
-      {/* 2. GitHub Token */}
-      <SectionCard
-        title="GitHub token"
-        description="Used for pulling private repositories during agent deployments."
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`w-1.5 h-1.5 rounded-full ${githubSet ? 'bg-status-green' : 'bg-text-muted'}`} />
-              <span className="text-xs text-text-secondary">
-                {githubSet ? 'Token configured' : 'Not configured'}
-              </span>
-            </div>
-            {githubHint && (
-              <p className="text-[10px] text-text-muted font-mono mt-1">{githubHint}</p>
-            )}
-          </div>
-          <Btn onClick={() => setModal('github')}>
-            {githubSet ? 'Rotate' : 'Set token'}
-          </Btn>
-        </div>
-      </SectionCard>
 
       {/* 3. Users */}
       <SectionCard
@@ -731,34 +690,6 @@ export default function SettingsPage() {
         />
       )}
 
-      {/* GitHub token modal */}
-      {modal === 'github' && (
-        <Modal title={githubSet ? 'Rotate GitHub token' : 'Set GitHub token'} onClose={() => setModal(null)}>
-          <div className="space-y-4">
-            <Field label="Personal access token">
-              <Input
-                type="password"
-                placeholder="ghp_••••••••••••••••••••••••••••••••••••••••"
-                value={githubToken}
-                onChange={e => setGithubToken(e.target.value)}
-              />
-            </Field>
-            <div className="flex gap-2 pt-1">
-              <Btn variant="default" onClick={() => setModal(null)}>Cancel</Btn>
-              <Btn
-                variant="primary"
-                disabled={!githubToken}
-                onClick={() => setSudo({
-                  title: 'Confirm GitHub token update',
-                  onConfirm: handleSetGitHub,
-                })}
-              >
-                Save
-              </Btn>
-            </div>
-          </div>
-        </Modal>
-      )}
 
       {/* Create user modal */}
       {modal === 'users' && (

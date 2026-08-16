@@ -670,12 +670,7 @@ func main() {
 	nginxService := services.NewNginxService(database)
 
 	// Job service — handles job queue (claim/complete lifecycle for agents)
-	// DeploymentService injected after init to avoid circular dependency
 	jobService := services.NewJobService(database)
-
-	// Deployment service — creates deployments and dispatches deploy jobs
-	deploymentService := services.NewDeploymentService(database, jobService, nodeService)
-	jobService.SetDeploymentService(deploymentService)
 
 	// Container service — manages raw container operations
 	containerService := services.NewContainerService(database)
@@ -889,9 +884,6 @@ func main() {
 			viewer.GET("/jobs/:id", jobService.Get)
 			viewer.GET("/jobs/:id/logs", jobService.GetLogs)
 
-			viewer.GET("/deployments", deploymentService.ListDeployments)
-			viewer.GET("/deployments/:id", deploymentService.GetDeployment)
-
 			viewer.GET("/containers", containerService.ListContainers)
 			viewer.GET("/containers/:id", containerService.GetContainer)
 
@@ -1028,7 +1020,6 @@ echo "✅ Agent updated successfully"
 			})
 
 			operator.POST("/jobs", jobService.Create)
-			operator.POST("/deployments", deploymentService.CreateDeployment)
 
 			operator.POST("/nginx/update", func(c *gin.Context) {
 				if err := nginxService.UpdateNginxConfig(); err != nil {
@@ -1076,8 +1067,6 @@ echo "✅ Agent updated successfully"
 			settings.GET("/tokens", settingsHandlers.ListTokens)
 			settings.POST("/tokens", settingsHandlers.GenerateToken)
 			settings.DELETE("/tokens/:id", settingsHandlers.RevokeToken)
-			settings.GET("/github-token", settingsHandlers.GetGitHubToken)
-			settings.POST("/github-token", settingsHandlers.SetGitHubToken)
 			settings.GET("/master-node", settingsHandlers.GetMasterNode)
 			settings.POST("/master-node", settingsHandlers.SetMasterNode)
 			settings.DELETE("/master-node", settingsHandlers.ClearMasterNode)

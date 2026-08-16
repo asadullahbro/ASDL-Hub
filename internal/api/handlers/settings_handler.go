@@ -86,35 +86,6 @@ func (h *SettingsHandlers) RevokeToken(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"revoked": true})
 }
-
-// --- GitHub token ---
-
-func (h *SettingsHandlers) GetGitHubToken(c *gin.Context) {
-	masked := h.settings.GetGitHubTokenMasked()
-	c.JSON(http.StatusOK, gin.H{"token": masked, "set": masked != ""})
-}
-
-func (h *SettingsHandlers) SetGitHubToken(c *gin.Context) {
-	user := currentUser(c)
-	var req struct {
-		Token    string `json:"token" binding:"required"`
-		Password string `json:"password" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if err := h.settings.VerifyAdminPassword(user.ID, req.Password); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-	if err := h.settings.SetGitHubToken(req.Token); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"set": true})
-}
-
 // --- Master node ---
 
 func (h *SettingsHandlers) GetMasterNode(c *gin.Context) {

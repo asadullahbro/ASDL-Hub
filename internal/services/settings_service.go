@@ -78,37 +78,6 @@ func (s *SettingsService) ListPermanentTokens() ([]models.PermanentToken, error)
 func (s *SettingsService) RevokePermanentToken(id string) error {
 	return s.db.Delete(&models.PermanentToken{}, "id = ?", id).Error
 }
-
-// --- GitHub token ---
-
-func (s *SettingsService) SetGitHubToken(token string) error {
-	setting := models.Setting{
-		Key:       "github_token",
-		Value:     token,
-		UpdatedAt: time.Now(),
-	}
-	return s.db.Save(&setting).Error
-}
-
-func (s *SettingsService) GetGitHubToken() (string, error) {
-	var setting models.Setting
-	if err := s.db.First(&setting, "key = ?", "github_token").Error; err != nil {
-		return "", nil // not set yet, not an error
-	}
-	return setting.Value, nil
-}
-
-func (s *SettingsService) GetGitHubTokenMasked() string {
-	token, err := s.GetGitHubToken()
-	if err != nil || token == "" {
-		return ""
-	}
-	if len(token) <= 8 {
-		return "••••••••"
-	}
-	return "••••••••" + token[len(token)-4:]
-}
-
 // --- Master node ---
 
 func (s *SettingsService) SetMasterNode(nodeID string) error {

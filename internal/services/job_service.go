@@ -15,7 +15,6 @@ import (
 
 type JobService struct {
 	db                *gorm.DB
-	deploymentService *DeploymentService
 }
 
 func NewJobService(db *gorm.DB) *JobService {
@@ -24,9 +23,7 @@ func NewJobService(db *gorm.DB) *JobService {
 	}
 }
 
-func (s *JobService) SetDeploymentService(deploymentService *DeploymentService) {
-	s.deploymentService = deploymentService
-}
+
 
 func (s *JobService) Create(c *gin.Context) {
 	var req struct {
@@ -148,17 +145,6 @@ func (s *JobService) Complete(c *gin.Context) {
 	job.CompletedAt = &now
 	s.db.Save(&job)
 
-	if job.Type == models.JobTypeDeploy && job.Status == models.JobStatusCompleted {
-		if s.deploymentService != nil {
-			var deployment models.Deployment
-			if err := s.db.Where("job_id = ?", job.ID).First(&deployment).Error; err == nil {
-				deployment.Status = models.DeploymentStatusCompleted
-				deployment.CompletedAt = &now
-				s.db.Save(&deployment)
-				s.deploymentService.CreateProjectFromDeployment(&deployment)
-			}
-		}
-	}
 
 	if job.Type == models.JobTypeMigrateStart || job.Type == models.JobTypeFailoverStart {
 		var migration models.Migration
