@@ -430,24 +430,16 @@ func extractRepoFromToken(rawToken string) string {
 
 // normalizes an image string by removing any SHA256 digest and keeping the last tag, defaulting to "latest" if no tag is found.
 func normalizeImage(image string) string {
-	// "ghcr.io/owner/repo:sha256abc:latest" → "ghcr.io/owner/repo:latest"
-	// "ghcr.io/owner/repo:sha256abc"        → "ghcr.io/owner/repo:latest"
-	// "ghcr.io/owner/repo:latest"           → "ghcr.io/owner/repo:latest"
-	parts := strings.SplitN(image, ":", 2)
-	if len(parts) < 2 {
-		return image
-	}
-	base := parts[0]
-	tags := strings.Split(parts[1], ":")
-
-	// Walk backwards to find a non-sha tag
-	for i := len(tags) - 1; i >= 0; i-- {
-		t := tags[i]
-		if !looksLikeSHA(t) && t != "" {
-			return base + ":" + t
-		}
-	}
-	return base + ":latest"
+	// "ghcr.io/owner/repo:abc1234:latest" → "ghcr.io/owner/repo:abc1234"
+	// "ghcr.io/owner/repo:abc1234"        → "ghcr.io/owner/repo:abc1234"
+	// "ghcr.io/owner/repo:latest"         → "ghcr.io/owner/repo:latest"
+    parts := strings.SplitN(image, ":", 2)
+    if len(parts) < 2 {
+        return image
+    }
+    base := parts[0]
+    firstTag := strings.Split(parts[1], ":")[0]
+    return base + ":" + firstTag
 }
 
 func looksLikeSHA(s string) bool {
