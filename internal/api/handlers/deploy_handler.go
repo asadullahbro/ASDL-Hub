@@ -433,23 +433,11 @@ func normalizeImage(image string) string {
 	// "ghcr.io/owner/repo:abc1234:latest" → "ghcr.io/owner/repo:abc1234"
 	// "ghcr.io/owner/repo:abc1234"        → "ghcr.io/owner/repo:abc1234"
 	// "ghcr.io/owner/repo:latest"         → "ghcr.io/owner/repo:latest"
-    parts := strings.SplitN(image, ":", 2)
-    if len(parts) < 2 {
-        return image
-    }
-    base := parts[0]
-    firstTag := strings.Split(parts[1], ":")[0]
-    return base + ":" + firstTag
-}
-
-func looksLikeSHA(s string) bool {
-	if len(s) < 7 || len(s) > 64 {
-		return false
+	parts := strings.SplitN(image, ":", 2)
+	if len(parts) < 2 {
+		return image
 	}
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return false
-		}
-	}
-	return true
+	base := parts[0]
+	firstTag := strings.Split(parts[1], ":")[0]
+	return base + ":" + firstTag
 }
