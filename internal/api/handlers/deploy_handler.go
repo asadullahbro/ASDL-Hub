@@ -35,6 +35,7 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
+	req.Image = normalizeImage(req.Image)
 
 	claims, err := h.verifier.Verify(req.OIDCToken)
 	if err != nil {
@@ -121,7 +122,7 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	if err := h.dispatch(project, deployment, node, req.Image, claims.SHA); err != nil {
+	if err := h.dispatch(project, deployment, node, req.Image); err != nil {
 		h.markStatus(deployment.ID, "failed", err.Error())
 		slog.Error("dispatch failed", "error", err, "node_id", node.ID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to dispatch deployment"})
@@ -200,7 +201,7 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 	return &node, nil
 }
 
-func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, node *models.Node, image, sha string) error {
+func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, node *models.Node, image string) error {
 	containerName := strings.ToLower(project.Name)
 
 	// Find a GitHub token for docker login
@@ -243,7 +244,7 @@ func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OID
 		NodeID:        node.ID,
 		Repository:    deployment.Repository,
 		Branch:        deployment.Ref,
-		Commit:        sha,
+		Commit:        deployment.SHA,
 		ImageName:     image,
 		ContainerName: containerName,
 		Type:          models.DeploymentTypeDocker,
@@ -423,4 +424,40 @@ func extractRepoFromToken(rawToken string) string {
 	}
 	_ = json.Unmarshal(payload, &claims)
 	return claims.Repository
+}
+
+// helper functions
+
+// normalizes an image string by removing any SHA256 digest and keeping the last tag, defaulting to "latest" if no tag is found.
+func normalizeImage(image string) string {
+	// "ghcr.io/owner/repo:sha256abc:latest" → "ghcr.io/owner/repo:latest"
+	// "ghcr.io/owner/repo:sha256abc"        → "ghcr.io/owner/repo:latest"
+	// "ghcr.io/owner/repo:latest"           → "ghcr.io/owner/repo:latest"
+	parts := strings.SplitN(image, ":", 2)
+	if len(parts) < 2 {
+		return image
+	}
+	base := parts[0]
+	tags := strings.Split(parts[1], ":")
+
+	// Walk backwards to find a non-sha tag
+	for i := len(tags) - 1; i >= 0; i-- {
+		t := tags[i]
+		if !looksLikeSHA(t) && t != "" {
+			return base + ":" + t
+		}
+	}
+	return base + ":latest"
+}
+
+func looksLikeSHA(s string) bool {
+	if len(s) < 7 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
