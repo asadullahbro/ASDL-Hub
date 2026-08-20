@@ -42,9 +42,7 @@ export function Sidebar() {
       {/* Mobile topbar */}
       <div className="flex h-12 items-center justify-between border-b border-border bg-surface px-4 md:hidden">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-accent flex items-center justify-center">
-            <span className="text-black text-xs font-bold">A</span>
-          </div>
+          <img src="/icon.svg" alt="ASDL Hub" className="w-6 h-6" />
           <span className="text-sm font-semibold text-text-primary tracking-wide">ASDL Hub</span>
         </div>
         <button
@@ -72,10 +70,8 @@ export function Sidebar() {
       `}>
         {/* Logo */}
         <div className="flex items-center justify-between h-12 px-4 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-accent flex items-center justify-center">
-              <span className="text-black text-xs font-bold">A</span>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <img src="/icon.svg" alt="ASDL Hub" className="w-6 h-6" />
             <span className="text-sm font-semibold text-text-primary tracking-wide">ASDL Hub</span>
           </div>
           <button

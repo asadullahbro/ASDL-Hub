@@ -7,6 +7,10 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'ASDL Hub',
   description: 'Distributed infrastructure control plane',
+  icons: {
+    icon: '/icon.svg',
+    apple: '/apple-icon.png', 
+  },
 };
 
 export default function RootLayout({

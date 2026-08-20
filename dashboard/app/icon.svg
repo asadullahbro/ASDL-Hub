@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>ASDL Hub node mesh favicon</title>
+  <rect width="64" height="64" rx="14" fill="#0f1418"/>
+
+  <!-- Mesh connections -->
+  <path
+    d="M32 12 L14 47 L50 47 Z"
+    fill="none"
+    stroke="#9a6413"
+    stroke-width="5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Connected nodes -->
+  <circle cx="32" cy="12" r="6.5" fill="#f29a00"/>
+  <circle cx="14" cy="47" r="6.5" fill="#f29a00"/>
+  <circle cx="50" cy="47" r="6.5" fill="#f29a00"/>
+</svg>
