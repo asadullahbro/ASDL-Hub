@@ -43,7 +43,7 @@ func Init(dsn string) (*gorm.DB, error) {
 	}
 	createDefaultAdmin(db)
 
-	log.Println("✅ PostgreSQL database initialized successfully")
+	log.Println("PostgreSQL database initialized successfully")
 	return db, nil
 }
 
@@ -59,9 +59,9 @@ func createDefaultAdmin(db *gorm.DB) {
 		// Get admin password from env or use default
 		adminPassword := os.Getenv("ADMIN_PASSWORD")
 		if adminPassword == "" {
-			adminPassword = "admin" // CHANGE THIS IN PRODUCTION!
-			log.Println("⚠️  WARNING: Using default admin password 'admin'")
-			log.Println("⚠️  Set ADMIN_PASSWORD environment variable to change it")
+			adminPassword = "admin" // CHANGE THIS IN PRODUCTION
+			log.Println("WARNING: Using default admin password 'admin'")
+			log.Println("Set ADMIN_PASSWORD environment variable to change it")
 		}
 
 		hashed, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
@@ -73,7 +73,7 @@ func createDefaultAdmin(db *gorm.DB) {
 		admin := models.User{
 			ID:       "admin",
 			Username: "admin",
-			Email:    "admin@asdlhub.com",
+			Email:    "admin@admin.go",
 			Password: string(hashed),
 			Role:     "admin",
 		}
@@ -83,9 +83,9 @@ func createDefaultAdmin(db *gorm.DB) {
 			return
 		}
 
-		log.Println("✅ Created default admin user")
-		log.Println("   Username: admin")
-		log.Printf("   Password: %s", adminPassword)
-		log.Println("   ⚠️  Change this password immediately!")
+		log.Println("Created default admin user")
+		log.Println("Username: admin")
+		log.Printf("Password: %s", adminPassword)
+		log.Println("Change this password immediately!")
 	}
 }

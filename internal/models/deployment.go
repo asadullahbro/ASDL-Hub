@@ -13,7 +13,7 @@ type Deployment struct {
 	CommitMsg  string `gorm:"size:255" json:"commit_msg"`
 	NodeID     string `gorm:"index;not null" json:"node_id"`
 	Status     string `gorm:"size:20;default:pending" json:"status"`
-	Type       string `gorm:"size:20;default:docker" json:"type"` // "docker" or "direct"
+	Type       string `gorm:"size:20;default:docker" json:"type"` 
 
 	// Docker specific
 	Dockerfile    string   `gorm:"size:255" json:"dockerfile"`

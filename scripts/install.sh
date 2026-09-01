@@ -542,7 +542,7 @@ verify() {
 summary() {
     echo
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                 ASDL Hub is ready! 🚀                       ║"
+    echo "║                 ASDL Hub is ready!                           ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo
     echo "  Dashboard:      $HUB_URL"

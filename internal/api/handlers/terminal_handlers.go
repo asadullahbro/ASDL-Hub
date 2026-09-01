@@ -64,13 +64,13 @@ func (h *TerminalHandlers) Terminal(c *gin.Context) {
 	// Open SSH session
 	session, err := h.terminal.OpenSession(nodeID)
 	if err != nil {
-		ws.WriteMessage(websocket.TextMessage, []byte("\r\n❌ "+err.Error()+"\r\n"))
+		ws.WriteMessage(websocket.TextMessage, []byte("\r\n"+err.Error()+"\r\n"))
 		return
 	}
 	defer session.Client.Close()
 	defer session.Session.Close()
 
-	ws.WriteMessage(websocket.TextMessage, []byte("\r\n✅  Connected to node\r\n"))
+	ws.WriteMessage(websocket.TextMessage, []byte("\r\nConnected to node\r\n"))
 
 	done := make(chan struct{})
 

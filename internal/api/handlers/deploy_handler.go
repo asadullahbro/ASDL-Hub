@@ -154,8 +154,6 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		return nil, fmt.Errorf("project lookup failed: %w", err)
 	}
 
-	// Need a node for the not null constraint — bestNode() will still
-	// be called again in Deploy() for the actual job dispatch
 	node, err := h.bestNode()
 	if err != nil {
 		return nil, fmt.Errorf("no available node for project creation: %w", err)
@@ -389,6 +387,8 @@ func (h *DeployHandler) RemoveGitHubToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
+// helper functions
+
 func splitRepo(repo string) (owner, name string, err error) {
 	for i, c := range repo {
 		if c == '/' {
@@ -425,8 +425,6 @@ func extractRepoFromToken(rawToken string) string {
 	_ = json.Unmarshal(payload, &claims)
 	return claims.Repository
 }
-
-// helper functions
 
 // normalizes an image string by removing any SHA256 digest and keeping the last tag, defaulting to "latest" if no tag is found.
 func normalizeImage(image string) string {
