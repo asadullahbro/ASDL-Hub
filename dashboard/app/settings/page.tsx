@@ -190,6 +190,8 @@ export default function SettingsPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [tokens, setTokens] = useState<PermanentToken[]>([]);
+  const [siriLinks, setSiriLinks] = useState<Record<string, string>>({});
+  const [siriDraft, setSiriDraft] = useState<Record<string, string>>({});
   const [masterNode, setMasterNode] = useState<Node | null>(null);
   const [enrollmentTokens, setEnrollmentTokens] = useState<EnrollmentToken[]>([]);
   const [enrollLabel, setEnrollLabel] = useState('');
@@ -218,12 +220,13 @@ export default function SettingsPage() {
   };
 
   const load = useCallback(async () => {
-    const [nodesRes, usersRes, tokensRes, masterRes, enrollRes] = await Promise.allSettled([
+    const [nodesRes, usersRes, tokensRes, masterRes, enrollRes, siriRes] = await Promise.allSettled([
     api.getNodes(),
     api.listUsers(),
     api.listTokens(),
     api.getMasterNode(),
     api.listEnrollmentTokens(),
+    api.getSiriShortcuts(),
 ]);
 
     if (enrollRes.status === 'fulfilled') setEnrollmentTokens(enrollRes.value);
@@ -231,7 +234,15 @@ export default function SettingsPage() {
     if (usersRes.status === 'fulfilled') setUsers(usersRes.value);
     if (tokensRes.status === 'fulfilled') setTokens(tokensRes.value);
     if (masterRes.status === 'fulfilled') setMasterNode(masterRes.value.master_node);
+    if (siriRes.status === 'fulfilled') { setSiriLinks(siriRes.value); setSiriDraft(siriRes.value); }
   }, []);
+
+  const handleSaveSiriLink = async (key: string) => {
+    const url = siriDraft[key] ?? '';
+    await api.setSiriShortcut(key, url);
+    setSiriLinks(prev => ({ ...prev, [key]: url }));
+    toast('ok', 'Saved');
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -460,6 +471,43 @@ export default function SettingsPage() {
         </div>
       </SectionCard>
 
+      {/* 2. Siri Shortcuts */}
+      <SectionCard
+        title="Siri Shortcuts"
+        description="Build each shortcut once in the Shortcuts app using a permanent token above, then paste its iCloud share link here. Tapping 'Open' from an iPhone or Mac adds it straight to Shortcuts."
+      >
+        <div className="space-y-4">
+          {[
+            { key: 'siri_shortcut_health_url', label: 'Check node health' },
+            { key: 'siri_shortcut_run_url', label: 'Run a command' },
+            { key: 'siri_shortcut_shutdown_url', label: 'Shut down a node' },
+          ].map(({ key, label }) => (
+            <div key={key} className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Field label={label}>
+                  <Input
+                    placeholder="https://www.icloud.com/shortcuts/..."
+                    value={siriDraft[key] ?? ''}
+                    onChange={e => setSiriDraft(prev => ({ ...prev, [key]: e.target.value }))}
+                  />
+                </Field>
+              </div>
+              <Btn
+                variant="default"
+                disabled={(siriDraft[key] ?? '') === (siriLinks[key] ?? '')}
+                onClick={() => handleSaveSiriLink(key)}
+              >
+                Save
+              </Btn>
+              {siriLinks[key] && (
+                <Btn variant="primary" onClick={() => window.open(siriLinks[key], '_blank', 'noopener,noreferrer')}>
+                  Open
+                </Btn>
+              )}
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       {/* 3. Users */}
       <SectionCard

@@ -130,8 +130,13 @@ func (s *JobService) Complete(c *gin.Context) {
 		return
 	}
 
+	// The completing caller must actually BE the node the job was assigned
+	// to. The old check ("id = job.NodeID OR vpn_ip = vpnIP") matched the
+	// first clause unconditionally — job.NodeID is always a valid node id —
+	// so any caller who knew a job ID could mark it complete regardless of
+	// which node they were calling from.
 	var node models.Node
-	if err := s.db.First(&node, "id = ? OR vpn_ip = ?", job.NodeID, vpnIP).Error; err != nil {
+	if err := s.db.First(&node, "vpn_ip = ?", vpnIP).Error; err != nil || node.ID != job.NodeID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized"})
 		return
 	}

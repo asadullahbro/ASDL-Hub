@@ -44,6 +44,10 @@ func main() {
 
 	cfg := loadConfig()
 
+	if cfg.Database.Password == "dbpass123" {
+		log.Println("⚠️  DB_PASSWORD is not set — using the insecure default. Set DB_PASSWORD before deploying anywhere but local dev.")
+	}
+
 	// Build PostgreSQL DSN
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Database.Host,
@@ -66,6 +70,9 @@ func main() {
 
 	// github handler
 	deployHandler := handlers.NewDeployHandler(database, cfg.Server.HubURL)
+
+	// Siri handler — voice/Shortcuts-friendly hostname-keyed actions
+	siriHandler := handlers.NewSiriHandler(database)
 
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
@@ -116,12 +123,21 @@ func main() {
 
 	router := gin.Default()
 
-	// CORS middleware
+	// CORS middleware — reflect only allow-listed origins. "*" combined with
+	// credentials is rejected by browsers anyway and defeats the point of CORS.
+	allowedOrigins := getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"})
 	router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				c.Header("Vary", "Origin")
+				break
+			}
+		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		c.Header("Access-Control-Allow-Credentials", "true")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -181,12 +197,18 @@ func main() {
 			c.String(http.StatusOK, script)
 		})
 
-		// Agent registration and heartbeats
-		public.POST("/nodes", func(c *gin.Context) {
-			clientIP := c.ClientIP()
-			c.Set("vpn_ip", clientIP)
-			nodeService.Register(c)
-		})
+		// Mesh-only routes — node identity here is derived purely from
+		// source IP, so these must never be reachable from outside the
+		// WireGuard network.
+		mesh := public.Group("/")
+		mesh.Use(middleware.VPNOnly(cfg.Server.VPNNetworks))
+		{
+			mesh.POST("/nodes", nodeService.Register)
+			mesh.POST("/nodes/:id/heartbeat", nodeService.Heartbeat)
+			mesh.POST("/jobs/claim", jobService.Claim)
+			mesh.POST("/jobs/:id/complete", jobService.Complete)
+		}
+
 		public.GET("/status", func(c *gin.Context) {
 			var nodes []models.Node
 			database.Order("online DESC, vpn_ip ASC").Find(&nodes)
@@ -218,23 +240,6 @@ func main() {
 				"online": onlineCount,
 				"total":  len(nodes),
 			})
-		})
-		public.POST("/nodes/:id/heartbeat", func(c *gin.Context) {
-			clientIP := c.ClientIP()
-			c.Set("vpn_ip", clientIP)
-			nodeService.Heartbeat(c)
-		})
-
-		// Job claiming and completion
-		public.POST("/jobs/claim", func(c *gin.Context) {
-			clientIP := c.ClientIP()
-			c.Set("vpn_ip", clientIP)
-			jobService.Claim(c)
-		})
-		public.POST("/jobs/:id/complete", func(c *gin.Context) {
-			clientIP := c.ClientIP()
-			c.Set("vpn_ip", clientIP)
-			jobService.Complete(c)
 		})
 	}
 
@@ -473,6 +478,11 @@ echo "Agent updated successfully"
 			operator.POST("/deploy/tokens", deployHandler.AddGitHubToken)
 			operator.DELETE("/deploy/tokens/:id", deployHandler.RemoveGitHubToken)
 			operator.GET("/deploy/history", deployHandler.ListDeployments)
+
+			// Siri Shortcuts — hostname-keyed, short JSON "message" responses
+			operator.GET("/siri/health", siriHandler.Health)
+			operator.POST("/siri/run", siriHandler.Run)
+			operator.POST("/siri/shutdown", siriHandler.Shutdown)
 		}
 
 		// Admin only - Enrollment token management
@@ -493,6 +503,8 @@ echo "Agent updated successfully"
 			settings.GET("/tokens", settingsHandlers.ListTokens)
 			settings.POST("/tokens", settingsHandlers.GenerateToken)
 			settings.DELETE("/tokens/:id", settingsHandlers.RevokeToken)
+			settings.GET("/siri-shortcuts", settingsHandlers.GetSiriShortcuts)
+			settings.POST("/siri-shortcuts", settingsHandlers.SetSiriShortcut)
 			settings.GET("/master-node", settingsHandlers.GetMasterNode)
 			settings.POST("/master-node", settingsHandlers.SetMasterNode)
 			settings.DELETE("/master-node", settingsHandlers.ClearMasterNode)
@@ -585,11 +597,10 @@ func getEnvAsInt(key string, defaultValue int) int {
 
 func getEnvAsStringSlice(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
-		// Parse comma-separated values
 		var result []string
-		for _, v := range splitAndTrim(value, ",") {
-			if v != "" {
-				result = append(result, v)
+		for _, v := range strings.Split(value, ",") {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				result = append(result, trimmed)
 			}
 		}
 		if len(result) > 0 {
@@ -597,43 +608,4 @@ func getEnvAsStringSlice(key string, defaultValue []string) []string {
 		}
 	}
 	return defaultValue
-}
-
-func splitAndTrim(s, sep string) []string {
-	parts := []string{}
-	for _, part := range splitString(s, sep) {
-		trimmed := trimSpace(part)
-		if trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-func splitString(s, sep string) []string {
-	// Simple split implementation
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep[0] {
-			result = append(result, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		result = append(result, s[start:])
-	}
-	return result
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }
