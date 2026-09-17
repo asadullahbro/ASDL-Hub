@@ -169,6 +169,10 @@ func main() {
 		public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
 		public.POST("/deploy", deployHandler.Deploy)
 
+		// Siri Shortcuts — plain files, no auth, so tapping the link in
+		// Safari on iOS/macOS triggers the native "Add Shortcut" import.
+		router.Static("/shortcuts", "./static/shortcuts")
+
 		// Install script
 		router.GET("/install", func(c *gin.Context) {
 			// 1. Read the raw file from disk

@@ -474,8 +474,32 @@ export default function SettingsPage() {
       {/* 2. Siri Shortcuts */}
       <SectionCard
         title="Siri Shortcuts"
-        description="Build each shortcut once in the Shortcuts app using a permanent token above, then paste its iCloud share link here. Tapping 'Open' from an iPhone or Mac adds it straight to Shortcuts."
+        description="Tap Download from an iPhone or Mac to add one instantly, no manual building. After adding, open the shortcut once and paste a permanent token (from above) into its Authorization header."
       >
+        <div className="space-y-3 mb-5">
+          {[
+            { file: 'hub-health.shortcut', label: 'Check node health' },
+            { file: 'run-command.shortcut', label: 'Run a command' },
+            { file: 'shutdown-node.shortcut', label: 'Shut down a node' },
+          ].map(({ file, label }) => (
+            <div key={file} className="flex items-center gap-3 px-3 py-2.5 bg-surface border border-border rounded-md">
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-text-primary">{label}</div>
+                <div className="text-[10px] text-text-muted font-mono mt-0.5">/shortcuts/{file}</div>
+              </div>
+              <Btn
+                variant="primary"
+                onClick={() => window.open(`${window.location.origin}/shortcuts/${file}`, '_blank')}
+              >
+                Download
+              </Btn>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[10px] uppercase tracking-wider text-text-secondary mb-2">
+          Or use a custom iCloud link
+        </p>
         <div className="space-y-4">
           {[
             { key: 'siri_shortcut_health_url', label: 'Check node health' },

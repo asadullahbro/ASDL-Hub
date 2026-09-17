@@ -1,0 +1,10 @@
+{
+  "name": "asdl-hub-shortcuts",
+  "private": true,
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "scpl": "^1.14.1"
+  }
+}
