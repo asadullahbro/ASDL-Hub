@@ -197,7 +197,8 @@ install_packages() {
         nginx \
         wireguard \
         iproute2 \
-        iptables
+        iptables \
+        nodejs npm
     ok "System dependencies ready."
 }
 
@@ -459,6 +460,25 @@ EOF
     ok "Configuration written."
 }
 
+build_shortcuts() {
+    if [[ ! -d "$PROJECT_DIR/scripts/shortcuts" ]]; then
+        return
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        warn "npm not available, skipping Siri Shortcuts build."
+        return
+    fi
+
+    info "Building Siri Shortcuts for $HUB_URL..."
+    if (cd "$PROJECT_DIR/scripts/shortcuts" \
+        && npm install --silent --no-fund --no-audit \
+        && HUB_URL="$HUB_URL" npm run build); then
+        ok "Siri Shortcuts built."
+    else
+        warn "Siri Shortcuts build failed. The Hub will still work; /shortcuts/*.shortcut just won't be available."
+    fi
+}
+
 install_files() {
 
     setcap cap_net_admin+eip /usr/bin/wg 2>/dev/null || true
@@ -471,6 +491,11 @@ install_files() {
     if [[ -d "$PROJECT_DIR/dashboard/out" ]]; then
         rm -rf "$INSTALL_DIR/dashboard"
         cp -a "$PROJECT_DIR/dashboard" "$INSTALL_DIR/dashboard"
+    fi
+
+    if [[ -d "$PROJECT_DIR/static" ]]; then
+        rm -rf "$INSTALL_DIR/static"
+        cp -a "$PROJECT_DIR/static" "$INSTALL_DIR/static"
     fi
 
     # Allow hub to manage WireGuard peers without password
@@ -578,6 +603,7 @@ main() {
     setup_database
     setup_wireguard
     write_env
+    build_shortcuts
     install_files
     setup_service
     setup_firewall

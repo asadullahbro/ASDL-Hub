@@ -94,6 +94,10 @@ jobs:
             "release/${PACKAGE}/dashboard/node_modules" \
             "release/${PACKAGE}/dashboard/.next"
 
+          cp -r static "release/${PACKAGE}/static"
+          cp -r scripts "release/${PACKAGE}/scripts"
+          rm -rf "release/${PACKAGE}/scripts/shortcuts/node_modules"
+
           cp go.mod "release/${PACKAGE}/"
           cp go.sum "release/${PACKAGE}/"
 
