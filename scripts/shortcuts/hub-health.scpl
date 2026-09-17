@@ -1,4 +1,4 @@
-Text "https://hub.asdl.website/api/v1/siri/health"
+Text "%%HUB_URL%%/api/v1/siri/health"
 GetContentsofURL advanced=true method="GET" headers=true headers2={"Authorization": "Bearer YOUR_TOKEN_HERE"}
 GetDictionaryValue get="Value" key="message"
 SpeakText

@@ -1,6 +1,6 @@
 AskforInput question="Which node?" inputType="Text" -> mv:Hostname
 AskforInput question="What command?" inputType="Text" -> mv:Command
-Text "https://hub.asdl.website/api/v1/siri/run"
+Text "%%HUB_URL%%/api/v1/siri/run"
 GetContentsofURL advanced=true method="POST" headers=true headers2={"Authorization": "Bearer YOUR_TOKEN_HERE"} requestBody="JSON" jSONValues={"hostname": mv:Hostname, "command": mv:Command}
 GetDictionaryValue get="Value" key="message"
 SpeakText

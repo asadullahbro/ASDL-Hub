@@ -1,6 +1,6 @@
 AskforInput question="Which node?" inputType="Text" -> mv:Hostname
 ShowAlert title="Shut down node?" message="Shut down \(mv:Hostname)?" showCancelButton=true
-Text "https://hub.asdl.website/api/v1/siri/shutdown"
+Text "%%HUB_URL%%/api/v1/siri/shutdown"
 GetContentsofURL advanced=true method="POST" headers=true headers2={"Authorization": "Bearer YOUR_TOKEN_HERE"} requestBody="JSON" jSONValues={"hostname": mv:Hostname}
 GetDictionaryValue get="Value" key="message"
 SpeakText
