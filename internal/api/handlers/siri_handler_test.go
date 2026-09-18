@@ -38,6 +38,41 @@ func decodeJSON(t *testing.T, w *httptest.ResponseRecorder) map[string]interface
 	return out
 }
 
+func TestSiriNodes_ReturnsSortedHostnames(t *testing.T) {
+	h, db := newSiriTestHandler(t)
+	db.Create(&models.Node{ID: "n1", Hostname: "nas", VPNIP: "10.100.0.3"})
+	db.Create(&models.Node{ID: "n2", Hostname: "mac-mini", VPNIP: "10.100.0.2"})
+
+	c, w := newJSONContext(http.MethodGet, "")
+	h.Nodes(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var hostnames []string
+	if err := json.Unmarshal(w.Body.Bytes(), &hostnames); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, w.Body.String())
+	}
+	if len(hostnames) != 2 || hostnames[0] != "mac-mini" || hostnames[1] != "nas" {
+		t.Fatalf("expected [mac-mini nas], got %v", hostnames)
+	}
+}
+
+func TestSiriNodes_EmptyWhenNoNodes(t *testing.T) {
+	h, _ := newSiriTestHandler(t)
+
+	c, w := newJSONContext(http.MethodGet, "")
+	h.Nodes(c)
+
+	var hostnames []string
+	if err := json.Unmarshal(w.Body.Bytes(), &hostnames); err != nil {
+		t.Fatalf("decode response: %v (body=%s)", err, w.Body.String())
+	}
+	if len(hostnames) != 0 {
+		t.Fatalf("expected empty list, got %v", hostnames)
+	}
+}
+
 func TestSiriHealth_AllOnline(t *testing.T) {
 	h, db := newSiriTestHandler(t)
 	db.Create(&models.Node{ID: "n1", Hostname: "mac-mini", VPNIP: "10.100.0.2", Online: true})

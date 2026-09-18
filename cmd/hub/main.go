@@ -485,6 +485,7 @@ echo "Agent updated successfully"
 
 			// Siri Shortcuts — hostname-keyed, short JSON "message" responses
 			operator.GET("/siri/health", siriHandler.Health)
+			operator.GET("/siri/nodes", siriHandler.Nodes)
 			operator.POST("/siri/run", siriHandler.Run)
 			operator.POST("/siri/shutdown", siriHandler.Shutdown)
 		}

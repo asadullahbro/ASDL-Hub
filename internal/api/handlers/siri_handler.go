@@ -33,6 +33,21 @@ func (h *SiriHandler) findNodeByHostname(hostname string) (*models.Node, error) 
 	return &node, err
 }
 
+// Nodes returns a plain list of hostnames, meant to feed a Shortcuts
+// "Choose from List" step so Run/Shutdown can offer a picker instead of
+// requiring the hostname to be typed out.
+func (h *SiriHandler) Nodes(c *gin.Context) {
+	var nodes []models.Node
+	h.db.Order("hostname ASC").Find(&nodes)
+
+	hostnames := make([]string, len(nodes))
+	for i, n := range nodes {
+		hostnames[i] = n.Hostname
+	}
+
+	c.JSON(http.StatusOK, hostnames)
+}
+
 // Health returns a one-line spoken-friendly summary of fleet health, e.g.
 // "3 of 4 nodes online. mac-mini has been offline since 14:02."
 func (h *SiriHandler) Health(c *gin.Context) {
