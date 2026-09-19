@@ -71,9 +71,6 @@ func main() {
 	// github handler
 	deployHandler := handlers.NewDeployHandler(database, cfg.Server.HubURL)
 
-	// Siri handler — voice/Shortcuts-friendly hostname-keyed actions
-	siriHandler := handlers.NewSiriHandler(database)
-
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
@@ -168,10 +165,6 @@ func main() {
 		public.POST("/enrollment/enroll", enrollmentHandlers.Enroll)
 		public.DELETE("/enrollment/rollback/:node_id", enrollmentHandlers.Rollback)
 		public.POST("/deploy", deployHandler.Deploy)
-
-		// Siri Shortcuts — plain files, no auth, so tapping the link in
-		// Safari on iOS/macOS triggers the native "Add Shortcut" import.
-		router.Static("/shortcuts", "./static/shortcuts")
 
 		// Install script
 		router.GET("/install", func(c *gin.Context) {
@@ -482,12 +475,6 @@ echo "Agent updated successfully"
 			operator.POST("/deploy/tokens", deployHandler.AddGitHubToken)
 			operator.DELETE("/deploy/tokens/:id", deployHandler.RemoveGitHubToken)
 			operator.GET("/deploy/history", deployHandler.ListDeployments)
-
-			// Siri Shortcuts — hostname-keyed, short JSON "message" responses
-			operator.GET("/siri/health", siriHandler.Health)
-			operator.GET("/siri/nodes", siriHandler.Nodes)
-			operator.POST("/siri/run", siriHandler.Run)
-			operator.POST("/siri/shutdown", siriHandler.Shutdown)
 		}
 
 		// Admin only - Enrollment token management
@@ -508,8 +495,6 @@ echo "Agent updated successfully"
 			settings.GET("/tokens", settingsHandlers.ListTokens)
 			settings.POST("/tokens", settingsHandlers.GenerateToken)
 			settings.DELETE("/tokens/:id", settingsHandlers.RevokeToken)
-			settings.GET("/siri-shortcuts", settingsHandlers.GetSiriShortcuts)
-			settings.POST("/siri-shortcuts", settingsHandlers.SetSiriShortcut)
 			settings.GET("/master-node", settingsHandlers.GetMasterNode)
 			settings.POST("/master-node", settingsHandlers.SetMasterNode)
 			settings.DELETE("/master-node", settingsHandlers.ClearMasterNode)

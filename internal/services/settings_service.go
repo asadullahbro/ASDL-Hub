@@ -107,36 +107,6 @@ func (s *SettingsService) ClearMasterNode() error {
 	return s.db.Delete(&models.Setting{}, "key = ?", "master_node_id").Error
 }
 
-// --- Siri Shortcuts links ---
-// Each is an iCloud "Copy Link" URL for a shortcut the admin built once in
-// the Shortcuts app (Settings > Tokens covers auth; these just save the
-// share links so the dashboard can offer one-tap "Add to Shortcuts" buttons).
-
-var siriShortcutKeys = map[string]bool{
-	"siri_shortcut_health_url":   true,
-	"siri_shortcut_run_url":      true,
-	"siri_shortcut_shutdown_url": true,
-}
-
-func (s *SettingsService) GetSiriShortcutLinks() map[string]string {
-	result := map[string]string{}
-	for key := range siriShortcutKeys {
-		var setting models.Setting
-		if err := s.db.First(&setting, "key = ?", key).Error; err == nil {
-			result[key] = setting.Value
-		}
-	}
-	return result
-}
-
-func (s *SettingsService) SetSiriShortcutLink(key, url string) error {
-	if !siriShortcutKeys[key] {
-		return errors.New("unknown shortcut key")
-	}
-	setting := models.Setting{Key: key, Value: url, UpdatedAt: time.Now()}
-	return s.db.Save(&setting).Error
-}
-
 func (s *SettingsService) GetMasterNode() (*models.Node, error) {
 	id := s.GetMasterNodeID()
 	if id == "" {

@@ -89,26 +89,6 @@ func (h *SettingsHandlers) RevokeToken(c *gin.Context) {
 
 // --- Master node ---
 
-func (h *SettingsHandlers) GetSiriShortcuts(c *gin.Context) {
-	c.JSON(http.StatusOK, h.settings.GetSiriShortcutLinks())
-}
-
-func (h *SettingsHandlers) SetSiriShortcut(c *gin.Context) {
-	var req struct {
-		Key string `json:"key" binding:"required"`
-		URL string `json:"url"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if err := h.settings.SetSiriShortcutLink(req.Key, req.URL); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"saved": true})
-}
-
 func (h *SettingsHandlers) GetMasterNode(c *gin.Context) {
 	node, err := h.settings.GetMasterNode()
 	if err != nil {

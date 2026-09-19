@@ -1,8 +1,0 @@
-Text "%%HUB_URL%%/api/v1/siri/nodes"
-GetContentsofURL advanced=true method="GET" headers=true headers2={"Authorization": "Bearer YOUR_TOKEN_HERE"}
-ChoosefromList prompt="Which node?" -> mv:Hostname
-AskforInput question="What command?" inputType="Text" -> mv:Command
-Text "%%HUB_URL%%/api/v1/siri/run"
-GetContentsofURL advanced=true method="POST" headers=true headers2={"Authorization": "Bearer YOUR_TOKEN_HERE"} requestBody="JSON" jSONValues={"hostname": mv:Hostname, "command": mv:Command}
-GetDictionaryValue get="Value" key="message"
-SpeakText

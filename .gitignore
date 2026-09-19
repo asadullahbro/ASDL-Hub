@@ -7,10 +7,6 @@
 /dist/
 /build/
 
-# Compiled Siri Shortcuts — bakes in this deployment's HUB_URL, regenerate
-# with `make build-shortcuts` rather than committing one hub's build
-/static/shortcuts/*.shortcut
-
 # Go coverage / profiling
 *.out
 *.prof

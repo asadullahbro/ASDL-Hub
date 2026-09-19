@@ -30,15 +30,6 @@ if [[ -d "$PROJECT_DIR/dashboard" && -f "$PROJECT_DIR/dashboard/package.json" ]]
     cd "$PROJECT_DIR"
 fi
 
-if [[ -d "$PROJECT_DIR/scripts/shortcuts" ]] && command -v npm &>/dev/null; then
-    if [[ -n "${HUB_URL:-}${PUBLIC_URL:-}" ]] || grep -qE '^(HUB_URL|PUBLIC_URL)=' "$PROJECT_DIR/.env" 2>/dev/null; then
-        echo "→ Building Siri Shortcuts..."
-        (cd "$PROJECT_DIR/scripts/shortcuts" && npm install --silent --no-fund --no-audit && npm run build)
-    else
-        echo "→ Skipping Siri Shortcuts build (HUB_URL/PUBLIC_URL not set yet)"
-    fi
-fi
-
 echo "→ Building Go binary..."
 
 if [[ -f "$PROJECT_DIR/cmd/hub/main.go" ]]; then

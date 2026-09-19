@@ -1,4 +1,4 @@
-.PHONY: build run clean test build-shortcuts
+.PHONY: build run clean test
 
 BINARY_NAME=asdl-hub
 BUILD_DIR=bin
@@ -23,6 +23,3 @@ clean:
 deps:`
 	go mod download
 	go mod tidy
-
-build-shortcuts:
-	cd scripts/shortcuts && npm install && npm run build

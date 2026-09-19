@@ -190,8 +190,6 @@ export default function SettingsPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [tokens, setTokens] = useState<PermanentToken[]>([]);
-  const [siriLinks, setSiriLinks] = useState<Record<string, string>>({});
-  const [siriDraft, setSiriDraft] = useState<Record<string, string>>({});
   const [masterNode, setMasterNode] = useState<Node | null>(null);
   const [enrollmentTokens, setEnrollmentTokens] = useState<EnrollmentToken[]>([]);
   const [enrollLabel, setEnrollLabel] = useState('');
@@ -220,13 +218,12 @@ export default function SettingsPage() {
   };
 
   const load = useCallback(async () => {
-    const [nodesRes, usersRes, tokensRes, masterRes, enrollRes, siriRes] = await Promise.allSettled([
+    const [nodesRes, usersRes, tokensRes, masterRes, enrollRes] = await Promise.allSettled([
     api.getNodes(),
     api.listUsers(),
     api.listTokens(),
     api.getMasterNode(),
     api.listEnrollmentTokens(),
-    api.getSiriShortcuts(),
 ]);
 
     if (enrollRes.status === 'fulfilled') setEnrollmentTokens(enrollRes.value);
@@ -234,15 +231,7 @@ export default function SettingsPage() {
     if (usersRes.status === 'fulfilled') setUsers(usersRes.value);
     if (tokensRes.status === 'fulfilled') setTokens(tokensRes.value);
     if (masterRes.status === 'fulfilled') setMasterNode(masterRes.value.master_node);
-    if (siriRes.status === 'fulfilled') { setSiriLinks(siriRes.value); setSiriDraft(siriRes.value); }
   }, []);
-
-  const handleSaveSiriLink = async (key: string) => {
-    const url = siriDraft[key] ?? '';
-    await api.setSiriShortcut(key, url);
-    setSiriLinks(prev => ({ ...prev, [key]: url }));
-    toast('ok', 'Saved');
-  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -468,64 +457,6 @@ export default function SettingsPage() {
               Generate
             </Btn>
           </div>
-        </div>
-      </SectionCard>
-
-      {/* 2. Siri Shortcuts */}
-      <SectionCard
-        title="Siri Shortcuts"
-        description="These files aren't Apple-signed, so the first import on a device needs a one-time toggle: Settings app → Shortcuts → Advanced → Allow Untrusted Shortcuts (it only appears after you try importing one). After that, every shortcut from here imports with no warning. Once imported, open it and paste a permanent token (from above) into its Authorization header."
-      >
-        <div className="space-y-3">
-          {[
-            { file: 'hub-health.shortcut', linkKey: 'siri_shortcut_health_url', label: 'Check node health' },
-            { file: 'run-command.shortcut', linkKey: 'siri_shortcut_run_url', label: 'Run a command' },
-            { file: 'shutdown-node.shortcut', linkKey: 'siri_shortcut_shutdown_url', label: 'Shut down a node' },
-          ].map(({ file, linkKey, label }) => {
-            const verifiedLink = siriLinks[linkKey];
-            return (
-              <div key={file} className="px-3 py-2.5 bg-surface border border-border rounded-md">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-text-primary">{label}</div>
-                    <div className="text-[10px] text-text-muted font-mono mt-0.5">
-                      {verifiedLink ? 'verified iCloud link' : `/shortcuts/${file} (untrusted-toggle required)`}
-                    </div>
-                  </div>
-                  <Btn
-                    variant="primary"
-                    onClick={() =>
-                      window.open(
-                        verifiedLink ?? `${window.location.origin}/shortcuts/${file}`,
-                        '_blank',
-                        'noopener,noreferrer'
-                      )
-                    }
-                  >
-                    {verifiedLink ? 'Open' : 'Download'}
-                  </Btn>
-                </div>
-                <div className="mt-2.5 flex gap-2 items-end">
-                  <div className="flex-1">
-                    <Field label="Skip the toggle: paste an iCloud link once imported (Share → Copy iCloud Link)">
-                      <Input
-                        placeholder="https://www.icloud.com/shortcuts/..."
-                        value={siriDraft[linkKey] ?? ''}
-                        onChange={e => setSiriDraft(prev => ({ ...prev, [linkKey]: e.target.value }))}
-                      />
-                    </Field>
-                  </div>
-                  <Btn
-                    variant="default"
-                    disabled={(siriDraft[linkKey] ?? '') === (siriLinks[linkKey] ?? '')}
-                    onClick={() => handleSaveSiriLink(linkKey)}
-                  >
-                    Save
-                  </Btn>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </SectionCard>
 

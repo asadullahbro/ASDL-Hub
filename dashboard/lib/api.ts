@@ -240,16 +240,6 @@ setGitHubToken: (token: string, password: string): Promise<{ set: boolean }> =>
     body: JSON.stringify({ token, password }),
   }),
 
-// Siri Shortcuts links
-getSiriShortcuts: (): Promise<Record<string, string>> =>
-  request('/settings/siri-shortcuts'),
-
-setSiriShortcut: (key: string, url: string): Promise<{ saved: boolean }> =>
-  request('/settings/siri-shortcuts', {
-    method: 'POST',
-    body: JSON.stringify({ key, url }),
-  }),
-
 // Master node
 getMasterNode: (): Promise<{ master_node: Node | null }> =>
   request('/settings/master-node'),
