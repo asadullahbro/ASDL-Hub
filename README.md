@@ -48,6 +48,11 @@ curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
 The installer handles dependencies, PostgreSQL, WireGuard, Nginx, the firewall, systemd, and the Hub itself.
 A domain is optional. If you don't provide one, ASDL Hub can use the server's public IP.
 
+To pin a specific release instead of always installing the latest, add the version before the project name:
+```bash
+curl -fsSL https://get.asdl.website/v0.4.3/asdl-hub | sudo bash
+```
+
 ## Documentation
 Full documentation:
 https://docs.asdl.website/asdl-hub
@@ -56,6 +61,7 @@ https://docs.asdl.website/asdl-hub
 ```bash
 curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
 ```
+Pin a version: `curl -fsSL https://get.asdl.website/v0.4.3/asdl-hub | sudo bash`
 
 ## Status
 ASDL Hub is currently under active development.
