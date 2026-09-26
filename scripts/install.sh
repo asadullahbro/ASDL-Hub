@@ -213,6 +213,17 @@ HELPER
     chown root:root "$CERT_HELPER"
     chmod 755 "$CERT_HELPER"
 
+    # certbot renews app certificates on its own timer, but with the webroot
+    # method nothing reloads nginx, which would keep serving the old
+    # certificate until it expired.
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/asdl-hub-reload-nginx <<'HOOK'
+#!/bin/sh
+# Installed by ASDL Hub: load renewed certificates.
+nginx -t && systemctl reload nginx
+HOOK
+    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/asdl-hub-reload-nginx
+
     nginx -t
     systemctl reload nginx
     ok "App routing configured."
