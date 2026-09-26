@@ -83,3 +83,39 @@ func TestCreateProject_DeploysInsteadOfClaimingRunning(t *testing.T) {
 		t.Errorf("unexpected port suggestion in:\n%s", job.Command)
 	}
 }
+
+func TestDeleteProject_RemovesContainerAndCancelsPendingDeploys(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Update("node_id", "good")
+	svc := NewProjectService(db, NewDeployer(db))
+	// A deploy to "ok" that no node has picked up yet.
+	if _, _, err := NewDeployer(db).Dispatch(func() *models.Project { p := loadProject(db); return &p }(),
+		&models.Node{ID: "ok", Hostname: "ok"}, "ghcr.io/o/api:v2", DeployMeta{Trigger: TriggerManual}); err != nil {
+		t.Fatal(err)
+	}
+
+	c, w := newTestContext(http.MethodDelete, "/projects/p1", "")
+	c.Params = gin.Params{{Key: "id", Value: "p1"}}
+	svc.DeleteProject(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+
+	var deploy models.Job
+	db.First(&deploy, "type = ?", models.JobTypeDeploy)
+	if deploy.Status != models.JobStatusCancelled {
+		t.Errorf("pending deploy = %q, want cancelled", deploy.Status)
+	}
+	var stops []models.Job
+	db.Where("type = ?", models.JobTypeFailoverStop).Find(&stops)
+	got := map[string]bool{}
+	for _, j := range stops {
+		got[j.NodeID] = true
+		if !strings.Contains(j.Command, "docker rm -f 'api'") {
+			t.Errorf("unexpected stop command %q", j.Command)
+		}
+	}
+	if !got["good"] || !got["ok"] || len(stops) != 2 {
+		t.Errorf("containers must be removed from good and ok, got %v", got)
+	}
+}

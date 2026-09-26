@@ -348,12 +348,53 @@ func (s *ProjectService) UpdateProjectStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, project)
 }
 
+// DeleteProject removes a project and its container. Deploys that haven't
+// started yet are cancelled, and every node that may run a copy (its node,
+// and the targets of deploys still pending or running) is told to remove it.
 func (s *ProjectService) DeleteProject(c *gin.Context) {
 	id := c.Param("id")
-	if err := s.db.Delete(&models.Project{}, "id = ?", id).Error; err != nil {
+	var project models.Project
+	if err := s.db.First(&project, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+
+	var jobIDs []string
+	s.db.Model(&models.Deployment{}).Where("project_id = ?", id).Pluck("job_id", &jobIDs)
+	nodes := map[string]bool{}
+	if project.NodeID != "" {
+		nodes[project.NodeID] = true
+	}
+	if len(jobIDs) > 0 {
+		var active []models.Job
+		s.db.Where("id IN ? AND status IN ?", jobIDs,
+			[]string{models.JobStatusPending, models.JobStatusRunning}).Find(&active)
+		for _, j := range active {
+			nodes[j.NodeID] = true
+		}
+		s.db.Model(&models.Job{}).Where("id IN ? AND status = ?", jobIDs, models.JobStatusPending).
+			Update("status", models.JobStatusCancelled)
+	}
+
+	if err := s.db.Delete(&project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	for nodeID := range nodes {
+		stop := &models.Job{
+			ID:         uuid.New().String(),
+			NodeID:     nodeID,
+			Type:       models.JobTypeFailoverStop,
+			Status:     models.JobStatusPending,
+			Command:    BuildStopCommand(project.Name),
+			MaxRetries: 2,
+			CreatedAt:  time.Now(),
+		}
+		if err := s.db.Create(stop).Error; err != nil {
+			log.Printf("⚠️ Deleted %s but could not queue removal of its container on node %s: %v", project.Name, nodeID, err)
+		}
+	}
+	log.Printf("🗑️ Deleted project %s; removing its container from %d node(s)", project.Name, len(nodes))
 	s.routesChanged()
 	c.JSON(http.StatusOK, gin.H{"message": "project deleted"})
 }

@@ -423,7 +423,7 @@ export default function ProjectsPage() {
             <div className="px-5 py-4 space-y-2">
               <h3 className="font-medium text-text-primary">Delete Project</h3>
               <p className="text-sm text-text-muted">
-                Are you sure you want to delete <span className="text-text-primary font-medium">{deletingProject.name}</span>? This cannot be undone.
+                Are you sure you want to delete <span className="text-text-primary font-medium">{deletingProject.name}</span>? Its container is stopped and removed from the node. This cannot be undone.
               </p>
             </div>
             <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
