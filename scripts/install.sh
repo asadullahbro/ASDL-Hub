@@ -82,6 +82,17 @@ setup_nginx() {
 
     info "Configuring Nginx..."
 
+    # Hubs set up by hand or by older installers may serve the Hub from a
+    # site with another name. Writing ours too would give nginx two server
+    # blocks for the same domain, so keep the existing one.
+    local existing
+    existing="$(grep -lE "server_name[^;]*[[:space:]]${HUB_HOST//./\\.}[[:space:];]" /etc/nginx/sites-enabled/* 2>/dev/null \
+        | grep -v "^$ENABLED\$" | head -n1 || true)"
+    if [[ -n "$existing" ]]; then
+        ok "Keeping existing Nginx site for $HUB_HOST: $existing"
+        return
+    fi
+
     cat > "$CONFIG" <<EOF
 server {
     listen 80;
