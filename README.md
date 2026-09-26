@@ -40,6 +40,7 @@ machine automatically if its own goes down.
 | **Failover in ~30 seconds** | Apps are health-checked every 10 seconds. If a machine or app stops answering, the app is redeployed on the healthiest other machine and traffic follows it. |
 | **Private mesh network** | Machines join over WireGuard. Only the Hub is exposed to the internet — a home PC behind a router works as a node. |
 | **One dashboard** | Nodes, apps, jobs with full logs, health, and a web terminal to each machine. |
+| **One-click updates** | The dashboard tells you when a new release is out and installs it for you, verified against the release checksums. |
 
 ## How it works
 
@@ -76,11 +77,12 @@ The installer sets up PostgreSQL, WireGuard, nginx, the firewall, HTTPS for
 the dashboard and the Hub itself, then prints your dashboard URL and admin
 login. A domain is optional — without one the Hub uses the server's IP.
 
-Run the same command to upgrade; your data and settings are kept. To install
+To upgrade, click **Update now** in the dashboard when it says a new release
+is out, or run the same command again; your data and settings are kept. To install
 a specific version, put it before the project name:
 
 ```bash
-curl -fsSL https://get.asdl.website/v0.6.1/asdl-hub | sudo bash
+curl -fsSL https://get.asdl.website/v0.6.2/asdl-hub | sudo bash
 ```
 
 ## Get started
