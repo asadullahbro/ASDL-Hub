@@ -33,6 +33,14 @@ func Init(dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// Older versions made repository unique even when empty, so only one
+	// project without a repository could exist.
+	if db.Migrator().HasIndex(&models.Project{}, "idx_projects_repository") {
+		if err := db.Migrator().DropIndex(&models.Project{}, "idx_projects_repository"); err != nil {
+			log.Printf("⚠️ Could not drop old projects.repository index: %v", err)
+		}
+	}
+
 	if err := db.AutoMigrate(
 		&models.Node{},
 		&models.Heartbeat{},

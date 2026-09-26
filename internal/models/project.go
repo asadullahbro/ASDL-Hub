@@ -7,11 +7,13 @@ import (
 )
 
 type Project struct {
-	ID           string   `gorm:"primaryKey;size:36" json:"id"`
-	Name         string   `gorm:"size:255;not null" json:"name"`
-	Description  string   `gorm:"size:500" json:"description"`
-	Domain       string   `gorm:"size:255" json:"domain"`
-	Repository   string   `gorm:"size:255;uniqueIndex" json:"repository"`
+	ID          string `gorm:"primaryKey;size:36" json:"id"`
+	Name        string `gorm:"size:255;not null" json:"name"`
+	Description string `gorm:"size:500" json:"description"`
+	Domain      string `gorm:"size:255" json:"domain"`
+	// Unique among projects that have one; projects made in the dashboard
+	// have no repository.
+	Repository   string   `gorm:"size:255;uniqueIndex:idx_projects_repository_set,where:repository <> ''" json:"repository"`
 	NodeID       string   `gorm:"index;not null" json:"node_id"`
 	ContainerID  string   `gorm:"index" json:"container_id"`
 	DeploymentID string   `gorm:"index" json:"deployment_id"`

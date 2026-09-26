@@ -2,6 +2,7 @@ package services
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -55,5 +56,30 @@ func TestUpdateProject_NodeChangeMovesApp(t *testing.T) {
 	}
 	if got := loadProject(db).NodeID; got != "good" {
 		t.Errorf("project must stay on its node until the new container runs, node = %q", got)
+	}
+}
+
+func TestCreateProject_DeploysInsteadOfClaimingRunning(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	svc := NewProjectService(db, NewDeployer(db))
+
+	c, w := newTestContext(http.MethodPost, "/projects", `{"name":"whoami","node_id":"good","image":"traefik/whoami:v1.10"}`)
+	svc.CreateProject(c)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var p models.Project
+	db.First(&p, "name = ?", "whoami")
+	if p.Status != "deploying" || p.NodeID != "" || !p.AutoPort {
+		t.Errorf("new project = status %q node %q auto %v; want deploying, no node until it runs, auto port", p.Status, p.NodeID, p.AutoPort)
+	}
+	var job models.Job
+	if err := db.First(&job, "type = ? AND node_id = ?", models.JobTypeDeploy, "good").Error; err != nil {
+		t.Fatalf("expected a deploy job on the chosen node: %v", err)
+	}
+	// p1 already uses 20000 in newFailoverEnv, but on node "dead"; on "good"
+	// nothing is taken, so the suggestion starts at the first auto port.
+	if !strings.Contains(job.Command, "HPORT=20000") {
+		t.Errorf("unexpected port suggestion in:\n%s", job.Command)
 	}
 }

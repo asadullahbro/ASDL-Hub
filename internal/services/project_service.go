@@ -135,13 +135,18 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		return
 	}
 
+	// Nothing runs yet: with an image the project is deployed to the chosen
+	// node right away and becomes "running" (with that node) once it starts.
+	status := "stopped"
+	if req.Image != "" {
+		status = "deploying"
+	}
 	project := &models.Project{
 		ID:           uuid.New().String(),
 		Name:         req.Name,
 		Description:  req.Description,
 		Domain:       req.Domain,
-		NodeID:       req.NodeID,
-		Status:       "running",
+		Status:       status,
 		HealthStatus: "unknown",
 		Image:        req.Image,
 		Ports:        req.Ports,
@@ -157,7 +162,14 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		return
 	}
 
-	s.routesChanged()
+	if req.Image != "" {
+		if _, _, err := s.deployer.Dispatch(project, &node, req.Image, DeployMeta{
+			Trigger:    TriggerMigration,
+			Repository: project.Repository,
+		}); err != nil {
+			log.Printf("⚠️ Created %s but could not deploy it: %v", project.Name, err)
+		}
+	}
 	c.JSON(http.StatusCreated, project)
 }
 func (s *ProjectService) UpdateProject(c *gin.Context) {
