@@ -68,7 +68,8 @@ setup_firewall() {
 
     info "Configuring UFW..."
     ufw allow 80/tcp >/dev/null
-    [[ "$USE_TLS" -eq 1 ]] && ufw allow 443/tcp >/dev/null
+    # 443 is needed for deployed apps' domains even when the Hub itself has none.
+    ufw allow 443/tcp >/dev/null
     ufw allow "${WG_PORT}/udp" >/dev/null
     ok "Firewall configured."
 }
@@ -150,6 +151,61 @@ EOF
     fi
 }
 
+
+# ── App routing (nginx routes + certificates for deployed projects) ────────
+
+ROUTES_DIR="/etc/nginx/asdl-hub.d"
+ACME_WEBROOT="/var/www/asdl-acme"
+CERT_HELPER="/usr/local/lib/asdl-hub/issue-cert"
+
+setup_app_routing() {
+    info "Configuring app routing..."
+
+    # The Hub writes routes for deployed projects here; nginx includes it
+    # from its http block via conf.d.
+    mkdir -p "$ROUTES_DIR" "$ACME_WEBROOT"
+    chown "$RUN_USER:$RUN_USER" "$ROUTES_DIR"
+    chmod 755 "$ROUTES_DIR" "$ACME_WEBROOT"
+    echo "include $ROUTES_DIR/*.conf;" > /etc/nginx/conf.d/asdl-hub-routes.conf
+
+    # Older Hub versions wrote routes here; they are now in $ROUTES_DIR.
+    rm -f /etc/nginx/sites-enabled/asdl-auto.conf /etc/nginx/sites-available/asdl-auto.conf
+
+    if ! command -v certbot >/dev/null 2>&1; then
+        apt-get update -qq
+        apt-get install -y certbot
+    fi
+
+    # Root-owned helper the Hub may run with sudo. It accepts exactly one
+    # domain name, so sudo access to it can't be used to pass certbot other
+    # options (such as hooks that would run as root).
+    mkdir -p "$(dirname "$CERT_HELPER")"
+    cat > "$CERT_HELPER" <<HELPER
+#!/bin/sh
+# Installed by ASDL Hub. Usage: issue-cert [--check] <domain>
+set -eu
+check=0
+if [ "\${1:-}" = "--check" ]; then check=1; shift; fi
+[ "\$#" -eq 1 ] || { echo "usage: issue-cert [--check] <domain>" >&2; exit 2; }
+domain="\$1"
+if ! printf '%s' "\$domain" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\$'; then
+    echo "invalid domain: \$domain" >&2
+    exit 2
+fi
+if [ "\$check" -eq 1 ]; then
+    exec test -s "/etc/letsencrypt/live/\$domain/fullchain.pem"
+fi
+exec certbot certonly --webroot -w "$ACME_WEBROOT" \\
+    --non-interactive --agree-tos --register-unsafely-without-email \\
+    --keep-until-expiring --cert-name "\$domain" -d "\$domain"
+HELPER
+    chown root:root "$CERT_HELPER"
+    chmod 755 "$CERT_HELPER"
+
+    nginx -t
+    systemctl reload nginx
+    ok "App routing configured."
+}
 
 # ── Main functions ───────────────────────────────────────────────────────────
 
@@ -478,10 +534,16 @@ install_files() {
         cp -a "$PROJECT_DIR/static" "$INSTALL_DIR/static"
     fi
 
-    # Allow hub to manage WireGuard peers without password
-    echo "asdl-hub ALL=(ALL) NOPASSWD: /usr/bin/wg, /usr/sbin/ip" \
-        > /etc/sudoers.d/asdl-hub
-    chmod 440 /etc/sudoers.d/asdl-hub
+    # Allow the hub to manage WireGuard peers, and to check and reload nginx
+    # and request certificates for the routes it writes, without a password.
+    cat > /etc/sudoers.d/asdl-hub.tmp <<EOF
+$RUN_USER ALL=(root) NOPASSWD: /usr/bin/wg, /usr/sbin/ip
+$RUN_USER ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/bin/systemctl reload nginx
+$RUN_USER ALL=(root) NOPASSWD: /usr/local/lib/asdl-hub/issue-cert
+EOF
+    chmod 440 /etc/sudoers.d/asdl-hub.tmp
+    visudo -cf /etc/sudoers.d/asdl-hub.tmp >/dev/null || die "Generated sudoers rules are invalid."
+    mv /etc/sudoers.d/asdl-hub.tmp /etc/sudoers.d/asdl-hub
 
     chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
@@ -587,6 +649,7 @@ main() {
     setup_service
     setup_firewall
     setup_nginx
+    setup_app_routing
     verify
     summary
 }
