@@ -31,3 +31,26 @@ type Project struct {
 func (Project) TableName() string {
 	return "projects"
 }
+
+// DefaultPortMapping is used when a project has no ports configured: the
+// container's port 8000 is published on the node's port 8000.
+const DefaultPortMapping = "8000:8000"
+
+// PortMappings returns the project's ports, or the default mapping when none
+// are configured, so deploys, health checks and nginx all agree on one port.
+func (p *Project) PortMappings() []string {
+	if len(p.Ports) == 0 {
+		return []string{DefaultPortMapping}
+	}
+	return p.Ports
+}
+
+// HostPort is the node port that traffic for the project is sent to: the host
+// side of the first port mapping.
+func (p *Project) HostPort() string {
+	host, _, err := ParsePortMapping(p.PortMappings()[0])
+	if err != nil {
+		host, _, _ = ParsePortMapping(DefaultPortMapping)
+	}
+	return host
+}

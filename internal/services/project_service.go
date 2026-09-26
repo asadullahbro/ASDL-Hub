@@ -14,10 +14,25 @@ import (
 
 type ProjectService struct {
 	db *gorm.DB
+	// onRoutesChanged is called after a project's domain, port or node may
+	// have changed, so nginx can be regenerated. Optional.
+	onRoutesChanged func()
 }
 
 func NewProjectService(db *gorm.DB) *ProjectService {
 	return &ProjectService{db: db}
+}
+
+// SetRoutesChangedHook registers fn to run (in the background) after a
+// project is created, updated or deleted.
+func (s *ProjectService) SetRoutesChangedHook(fn func()) {
+	s.onRoutesChanged = fn
+}
+
+func (s *ProjectService) routesChanged() {
+	if s.onRoutesChanged != nil {
+		go s.onRoutesChanged()
+	}
 }
 
 func (s *ProjectService) ListProjects(c *gin.Context) {
@@ -89,6 +104,10 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := models.ValidateProjectConfig(req.Name, req.Domain, req.Ports, req.EnvVars); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	var node models.Node
 	if err := s.db.First(&node, "id = ?", req.NodeID).Error; err != nil {
@@ -117,6 +136,7 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		return
 	}
 
+	s.routesChanged()
 	c.JSON(http.StatusCreated, project)
 }
 func (s *ProjectService) UpdateProject(c *gin.Context) {
@@ -135,6 +155,10 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	}
 
 	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := models.ValidateProjectConfig(req.Name, req.Domain, req.Ports, req.EnvVars); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -177,6 +201,7 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	}
 
 	s.db.Save(&project)
+	s.routesChanged()
 	c.JSON(http.StatusOK, project)
 }
 
@@ -219,5 +244,6 @@ func (s *ProjectService) DeleteProject(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	s.routesChanged()
 	c.JSON(http.StatusOK, gin.H{"message": "project deleted"})
 }

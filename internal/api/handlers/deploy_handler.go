@@ -15,6 +15,7 @@ import (
 
 	githuboidc "github.com/asdl/hub/internal/github"
 	"github.com/asdl/hub/internal/models"
+	"github.com/asdl/hub/internal/services"
 )
 
 type DeployHandler struct {
@@ -94,8 +95,7 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	// Health-aware node selection
-	node, err := h.bestNode()
+	node, err := h.targetNode(project)
 	if err != nil {
 		slog.Error("no available node", "error", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no available nodes"})
@@ -143,29 +143,22 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 	var project models.Project
 	err := h.db.First(&project, "repository = ?", claims.Repository).Error
 	if err == nil {
-		h.db.Model(&project).Updates(map[string]interface{}{
-			"image":         image,
-			"last_deployed": time.Now(),
-			"updated_at":    time.Now(),
-		})
+		// The project's image and last_deployed only change once the deploy
+		// succeeds, so failover keeps using the last image that worked.
 		return &project, nil
 	}
 	if err != gorm.ErrRecordNotFound {
 		return nil, fmt.Errorf("project lookup failed: %w", err)
 	}
 
-	node, err := h.bestNode()
-	if err != nil {
-		return nil, fmt.Errorf("no available node for project creation: %w", err)
-	}
-
 	_, repoName, _ := splitRepo(claims.Repository)
 
+	// NodeID stays empty until the first deploy job succeeds, at which point
+	// JobService.Complete records the node the container actually runs on.
 	project = models.Project{
 		ID:           uuid.New().String(),
 		Name:         strings.ToLower(repoName),
 		Repository:   claims.Repository,
-		NodeID:       node.ID,
 		Image:        image,
 		Status:       "deploying",
 		HealthStatus: "unknown",
@@ -179,6 +172,20 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		}
 	}
 	return &project, nil
+}
+
+// targetNode keeps a project on the node it already runs on while that node
+// is online, so a redeploy replaces the container instead of starting a second
+// copy elsewhere. New projects, and projects whose node is offline, go to the
+// best available node.
+func (h *DeployHandler) targetNode(project *models.Project) (*models.Node, error) {
+	if project.NodeID != "" {
+		var current models.Node
+		if h.db.First(&current, "id = ? AND online = ?", project.NodeID, true).Error == nil {
+			return &current, nil
+		}
+	}
+	return h.bestNode()
 }
 
 func (h *DeployHandler) bestNode() (*models.Node, error) {
@@ -200,37 +207,28 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 }
 
 func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, node *models.Node, image string) error {
-	containerName := strings.ToLower(project.Name)
+	containerName := project.Name
 
-	// Find a GitHub token for docker login
-	var tokens []models.GitHubToken
-	h.db.Find(&tokens)
-
-	loginCmd := ""
-	if len(tokens) > 0 {
-		// Use the first token — GHCR accepts any valid PAT with read:packages
-		loginCmd = fmt.Sprintf(
-			"echo %s | docker login ghcr.io -u x-access-token --password-stdin && ",
-			tokens[0].Token,
-		)
+	// The registry token reaches the node as an environment variable so it is
+	// not stored in the job's command or echoed into the job logs.
+	var env []string
+	if strings.HasPrefix(image, "ghcr.io/") {
+		var token models.GitHubToken
+		if h.db.Order("created_at desc").First(&token).Error == nil {
+			env = append(env, services.RegistryTokenEnv+"="+token.Token)
+		}
 	}
-
-	command := fmt.Sprintf(
-		"%sdocker pull %s && docker stop %s 2>/dev/null || true && docker rm %s 2>/dev/null || true && docker run -d --name %s %s",
-		loginCmd,
-		image,
-		containerName, containerName,
-		containerName, image,
-	)
+	command := services.BuildDeployCommand(project, image, len(env) > 0)
 
 	job := &models.Job{
-		ID:         uuid.New().String(),
-		NodeID:     node.ID,
-		Type:       models.JobTypeDeploy,
-		Status:     models.JobStatusPending,
-		Command:    command,
-		MaxRetries: 1,
-		CreatedAt:  time.Now(),
+		ID:          uuid.New().String(),
+		NodeID:      node.ID,
+		Type:        models.JobTypeDeploy,
+		Status:      models.JobStatusPending,
+		Command:     command,
+		Environment: env,
+		MaxRetries:  1,
+		CreatedAt:   time.Now(),
 	}
 	if err := h.db.Create(job).Error; err != nil {
 		return fmt.Errorf("failed to create deploy job: %w", err)
@@ -245,6 +243,8 @@ func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OID
 		Commit:        deployment.SHA,
 		ImageName:     image,
 		ContainerName: containerName,
+		Ports:         project.PortMappings(),
+		Volumes:       project.Volumes,
 		Type:          models.DeploymentTypeDocker,
 		Status:        models.DeploymentStatusPending,
 		CreatedAt:     time.Now(),
@@ -252,6 +252,10 @@ func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OID
 	if err := h.db.Create(dep).Error; err != nil {
 		return fmt.Errorf("failed to create deployment record: %w", err)
 	}
+	h.db.Model(&models.OIDCDeployment{}).Where("id = ?", deployment.ID).Update("job_id", job.ID)
+	// Status is left alone: a running project keeps serving (and keeps its
+	// nginx route) until JobService.Complete records the outcome.
+	h.db.Model(project).Update("deployment_id", dep.ID)
 
 	slog.Info("deploy job created",
 		"job_id", job.ID,

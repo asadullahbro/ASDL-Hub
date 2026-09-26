@@ -28,6 +28,7 @@ type OIDCDeployment struct {
 	Ref         string    `json:"ref"`
 	Workflow    string    `json:"workflow"`
 	RunID       string    `json:"run_id"`
+	JobID       string    `gorm:"index" json:"job_id"`
 	Image       string    `json:"image"`
 	Status      string    `json:"status"`
 	Error       string    `json:"error,omitempty"`

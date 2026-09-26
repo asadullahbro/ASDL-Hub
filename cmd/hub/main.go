@@ -87,6 +87,15 @@ func main() {
 	// Project service — tracks running projects and their health state
 	projectService := services.NewProjectService(database)
 
+	// Regenerate nginx when a deploy or project edit changes where a domain points
+	updateRoutes := func() {
+		if err := nginxService.UpdateNginxConfig(); err != nil {
+			log.Printf("⚠️ Failed to update Nginx config: %v", err)
+		}
+	}
+	jobService.SetRoutesChangedHook(updateRoutes)
+	projectService.SetRoutesChangedHook(updateRoutes)
+
 	// Migration service — handles container migrations between nodes
 	migrationService := services.NewMigrationService(database, jobService, nginxService)
 	migrationService.StartMigrationSweeper()

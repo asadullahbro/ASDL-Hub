@@ -294,7 +294,7 @@ export default function ProjectsPage() {
                 { label: 'Description', key: 'description' },
                 { label: 'Domain', key: 'domain' },
                 { label: 'Image', key: 'image' },
-                { label: 'Ports (comma separated)', key: 'ports' },
+                { label: 'Ports (host:container, comma separated, e.g. 8080:8000)', key: 'ports' },
               ].map(({ label, key }) => (
                 <div key={key}>
                   <label className="block text-xs text-text-muted mb-1">{label}</label>
