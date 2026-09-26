@@ -87,6 +87,7 @@ func main() {
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
+	nodeOps := services.NewNodeOpsService(database, deployer)
 
 	// Nginx service — generates and reloads nginx config from running projects
 	nginxService := services.NewNginxService(database)
@@ -241,6 +242,7 @@ func main() {
 		{
 			mesh.POST("/nodes", nodeService.Register)
 			mesh.POST("/nodes/:id/heartbeat", nodeService.Heartbeat)
+			mesh.POST("/nodes/:id/maintenance", nodeOps.SetMaintenanceFromNode)
 			mesh.POST("/jobs/claim", jobService.Claim)
 			mesh.POST("/jobs/:id/complete", jobService.Complete)
 		}
@@ -349,6 +351,7 @@ func main() {
 			viewer.GET("/nodes", nodeService.List)
 			viewer.GET("/nodes/:id/details", nodeService.GetNodeDetails)
 			viewer.GET("/nodes/:id", nodeService.Get)
+			viewer.GET("/nodes/:id/connection", nodeOps.Connection)
 
 			viewer.GET("/jobs", jobService.List)
 			viewer.GET("/jobs/:id", jobService.Get)
@@ -502,6 +505,10 @@ echo "Agent updated successfully"
 			operator.POST("/containers/:id/stop", containerService.StopContainer)
 			operator.POST("/containers/:id/start", containerService.StartContainer)
 			operator.POST("/containers/:id/restart", containerService.RestartContainer)
+			operator.PUT("/nodes/:id/maintenance", nodeOps.SetMaintenanceHandler)
+			// Logs can contain secrets, so reading them needs operator too.
+			operator.POST("/nodes/:id/containers/:name/logs", nodeOps.ContainerLogs)
+			operator.POST("/nodes/:id/containers/:name/restart", nodeOps.RestartContainer)
 
 			operator.POST("/projects", projectService.CreateProject)
 			operator.PUT("/projects/:id", projectService.UpdateProject)

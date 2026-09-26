@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, SystemVersion } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { VERSION_CHECKED_EVENT } from '@/components/settings/HubVersion';
 
 const CHECK_INTERVAL = 30 * 60_000;
 const UPGRADE_TIMEOUT = 5 * 60_000;
@@ -39,7 +40,11 @@ export function UpdateBanner() {
     } catch {}
     load();
     const t = setInterval(load, CHECK_INTERVAL);
-    return () => clearInterval(t);
+    window.addEventListener(VERSION_CHECKED_EVENT, load);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener(VERSION_CHECKED_EVENT, load);
+    };
   }, [load]);
 
   // While upgrading, wait for the Hub to come back on the new version.

@@ -44,7 +44,9 @@ func BuildDeployCommand(spec DeploySpec) (string, []string) {
 	img := shellQuote(spec.Image)
 
 	var env []string
-	opts := []string{"-d", "--name", name, "--restart unless-stopped"}
+	// Labels let the node's agent tell the Hub's containers from others.
+	opts := []string{"-d", "--name", name, "--restart unless-stopped",
+		"--label", "asdl.managed=true", "--label", "asdl.project=" + shellQuote(p.ID)}
 	for _, v := range p.Volumes {
 		opts = append(opts, "-v", shellQuote(v))
 	}

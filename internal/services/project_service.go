@@ -225,6 +225,9 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 		} else if !node.Online {
 			c.JSON(http.StatusConflict, gin.H{"error": "node " + node.Hostname + " is offline"})
 			return
+		} else if node.Maintenance {
+			c.JSON(http.StatusConflict, gin.H{"error": "node " + node.Hostname + " is in maintenance"})
+			return
 		} else {
 			moveTo = &node
 		}
@@ -300,8 +303,8 @@ func (s *ProjectService) redeploy(project *models.Project) (*models.Job, error) 
 		return nil, fmt.Errorf("project has no image yet; deploy it from CI first")
 	}
 	var node models.Node
-	if err := s.db.First(&node, "id = ? AND online = ?", project.NodeID, true).Error; err != nil {
-		if err := s.db.Where("online = ?", true).Order("health_score desc").First(&node).Error; err != nil {
+	if err := s.db.Scopes(models.Available).First(&node, "id = ?", project.NodeID).Error; err != nil {
+		if err := s.db.Scopes(models.Available).Order("health_score desc").First(&node).Error; err != nil {
 			return nil, fmt.Errorf("no online node to run it on")
 		}
 	}

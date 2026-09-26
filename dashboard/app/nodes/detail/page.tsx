@@ -12,10 +12,6 @@ import {
   WifiOff,
   Clock,
   Activity,
-  Boxes,
-  Play,
-  Square,
-  RotateCw,
   Signal,
   SignalLow,
   SignalMedium,
@@ -23,8 +19,12 @@ import {
   Gauge,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
-import type { Node, NodeHealth, Project, Container } from '@/types/index';
+import type { Node, NodeHealth, Project } from '@/types/index';
 import { TerminalModal } from '@/components/terminal/TerminalModal';
+import { NodeApps } from '@/components/nodes/NodeApps';
+import { NodeConnection } from '@/components/nodes/NodeConnection';
+import { NodeMaintenance } from '@/components/nodes/NodeMaintenance';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '—';
@@ -130,26 +130,24 @@ export default function NodeDetailPage() {
   const [node, setNode] = useState<Node | null>(null);
   const [health, setHealth] = useState<NodeHealth | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [containerActionId, setContainerActionId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const canEdit = user?.role === 'admin' || user?.role === 'operator';
   const [terminalNodeId, setTerminalNodeId] = useState<string | null>(null);
 
 
   const loadAll = useCallback(async () => {
     if (!id) return;
     try {
-      const [nodeRes, healthRes, projectsRes, containersRes] = await Promise.all([
+      const [nodeRes, healthRes, projectsRes] = await Promise.all([
         api.getNode(id),
         api.getNodeHealth(id).catch(() => null),
         api.getProjectsByNode(id).catch(() => []),
-        api.getContainers(id).catch(() => []),
       ]);
       setNode(nodeRes);
       setHealth(healthRes);
       setProjects(projectsRes);
-      setContainers(containersRes);
       setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
@@ -167,23 +165,6 @@ export default function NodeDetailPage() {
     const interval = setInterval(loadAll, 15000);
     return () => clearInterval(interval);
   }, [loadAll]);
-
-  async function handleContainerAction(
-    containerId: string,
-    action: 'start' | 'stop' | 'restart'
-  ) {
-    setContainerActionId(containerId);
-    try {
-      if (action === 'start') await api.startContainer(containerId);
-      if (action === 'stop') await api.stopContainer(containerId);
-      if (action === 'restart') await api.restartContainer(containerId);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${action} container`);
-    } finally {
-      setContainerActionId(null);
-    }
-  }
 
   if (loading) {
     return (
@@ -358,6 +339,9 @@ export default function NodeDetailPage() {
         )}
       </div>
 
+      <NodeMaintenance node={node} canEdit={canEdit} onChange={loadAll} />
+      <NodeConnection nodeId={node.id} />
+
       {/* Health breakdown */}
       {details && (
         <div className="bg-surface border border-border rounded-lg p-6">
@@ -416,64 +400,8 @@ export default function NodeDetailPage() {
         )}
       </div>
 
-      {/* Containers on this node */}
-      <div className="bg-surface border border-border rounded-lg p-6">
-        <h2 className="text-sm font-semibold text-text-primary mb-4 flex items-center gap-2">
-          <Boxes className="h-4 w-4" /> Containers ({containers.length})
-        </h2>
-        {containers.length === 0 ? (
-          <div className="text-sm text-text-muted">No containers on this node</div>
-        ) : (
-          <div className="space-y-2">
-            {containers.map((container) => (
-              <div
-                key={container.id}
-                className="flex items-center justify-between p-3 rounded border border-border"
-              >
-                <div>
-                  <div className="text-sm font-medium text-text-primary">{container.name}</div>
-                  <div className="text-xs text-text-muted font-mono">{container.image}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${statusBadgeColor(
-                      container.status
-                    )}`}
-                  >
-                    {container.status}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleContainerAction(container.id, 'start')}
-                      disabled={containerActionId === container.id}
-                      className="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-status-green disabled:opacity-40"
-                      title="Start"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleContainerAction(container.id, 'stop')}
-                      disabled={containerActionId === container.id}
-                      className="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-status-red disabled:opacity-40"
-                      title="Stop"
-                    >
-                      <Square className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleContainerAction(container.id, 'restart')}
-                      disabled={containerActionId === container.id}
-                      className="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-status-yellow disabled:opacity-40"
-                      title="Restart"
-                    >
-                      <RotateCw className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <NodeApps nodeId={node.id} containers={node.containers ?? []} canEdit={canEdit} online={node.online} />
+
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { HubVersion } from '@/components/settings/HubVersion';
 import { api } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Node, User, PermanentToken, EnrollmentToken } from '@/types';
@@ -561,6 +562,8 @@ export default function SettingsPage() {
           </Btn>
         </div>
       </SectionCard>
+
+      <HubVersion />
 
       {/* 6. Agents */}
       <SectionCard

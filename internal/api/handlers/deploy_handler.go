@@ -200,7 +200,7 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 func (h *DeployHandler) targetNode(project *models.Project) (*models.Node, error) {
 	if project.NodeID != "" {
 		var current models.Node
-		if h.db.First(&current, "id = ? AND online = ?", project.NodeID, true).Error == nil {
+		if h.db.Scopes(models.Available).First(&current, "id = ?", project.NodeID).Error == nil {
 			return &current, nil
 		}
 	}
@@ -211,13 +211,13 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 	var masterSetting models.Setting
 	if h.db.First(&masterSetting, "key = ?", "master_node_id").Error == nil && masterSetting.Value != "" {
 		var master models.Node
-		if h.db.First(&master, "id = ? AND online = ?", masterSetting.Value, true).Error == nil {
+		if h.db.Scopes(models.Available).First(&master, "id = ?", masterSetting.Value).Error == nil {
 			return &master, nil
 		}
 	}
 
 	var node models.Node
-	if err := h.db.Where("online = ?", true).
+	if err := h.db.Scopes(models.Available).
 		Order("health_score desc").
 		First(&node).Error; err != nil {
 		return nil, fmt.Errorf("no online nodes available")

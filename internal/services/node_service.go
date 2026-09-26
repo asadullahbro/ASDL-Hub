@@ -109,6 +109,9 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 		LoadAvg15   float64 `json:"load_avg_15"`
 		PingLatency float64 `json:"ping_latency"`
 		WiFiSignal  int     `json:"wifi_signal"`
+		// Sent by agents from 2026-09-27 on; nil from older ones.
+		AgentVersion string                 `json:"agent_version"`
+		Containers   []models.NodeContainer `json:"containers"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -132,6 +135,12 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 	node.LoadAvg15 = req.LoadAvg15
 	node.PingLatency = req.PingLatency
 	node.WiFiSignal = req.WiFiSignal
+	if req.AgentVersion != "" {
+		node.AgentVersion = req.AgentVersion
+	}
+	if req.Containers != nil {
+		node.Containers = req.Containers
+	}
 
 	// Recalculate health score
 	healthScore := s.calculateHealthScore(&node)
@@ -155,7 +164,8 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 	}
 	s.db.Create(&heartbeat)
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	// The agent shows maintenance mode on its own dashboard.
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "maintenance": node.Maintenance})
 }
 
 func (s *NodeService) List(c *gin.Context) {
@@ -185,8 +195,11 @@ func (s *NodeService) GetNodeDetails(c *gin.Context) {
 	var projects []models.Project
 	s.db.Where("node_id = ?", id).Find(&projects)
 
-	var containers []models.Container
-	s.db.Where("node_id = ?", id).Find(&containers)
+	// Containers are what the node's agent last reported.
+	containers := node.Containers
+	if containers == nil {
+		containers = []models.NodeContainer{}
+	}
 
 	healthScore := s.calculateHealthScore(&node)
 

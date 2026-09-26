@@ -6,6 +6,11 @@ export interface Node {
   os: string;
   architecture: string;
   agent_version: string | null;
+  maintenance?: boolean;
+  maintenance_since?: string | null;
+  maintenance_by?: string;
+  // What the node's agent last reported running.
+  containers?: NodeContainer[] | null;
   cpu: number;
   cpu_cores?: number;
   memory_total: number;
@@ -293,4 +298,28 @@ export interface GitHubToken {
   label: string;
   token: string;
   created_at: string;
+}
+export interface NodeContainer {
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports: string;
+  managed: boolean;
+  project_id?: string;
+}
+
+export interface NodeConnection {
+  online: boolean;
+  last_heartbeat: string;
+  ping_latency: number;
+  agent_version: string;
+  wg_handshake?: string;
+  wg_error?: string;
+}
+
+export interface MaintenanceResult {
+  node: Node;
+  moving: string[];
+  stays: string[];
 }

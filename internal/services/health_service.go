@@ -192,7 +192,7 @@ func (s *HealthService) failoverTarget(project *models.Project) *models.Node {
 			models.MigrationStatusFailed, time.Now().Add(-failoverCooldown)).
 		Pluck("target_node_id", &failed)
 
-	q := s.db.Where("online = ? AND id != ?", true, project.NodeID)
+	q := s.db.Scopes(models.Available).Where("id != ?", project.NodeID)
 	if len(failed) > 0 {
 		q = q.Where("id NOT IN ?", failed)
 	}

@@ -21,7 +21,9 @@ import {
   EnrollmentToken,
   OIDCDeployment,
   AllowedRepo,
-  GitHubToken
+  GitHubToken,
+  NodeConnection,
+  MaintenanceResult,
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -92,8 +94,25 @@ async function request<T>(
 
 export const api = {
   // Hub version and updates
-  getSystemVersion: (): Promise<SystemVersion> =>
-    request<SystemVersion>('/system/version'),
+  getSystemVersion: (refresh = false): Promise<SystemVersion> =>
+    request<SystemVersion>(`/system/version${refresh ? '?refresh=1' : ''}`),
+
+  // Node operations
+  getNodeConnection: (id: string): Promise<NodeConnection> =>
+    request<NodeConnection>(`/nodes/${id}/connection`),
+
+  setNodeMaintenance: (id: string, enabled: boolean): Promise<MaintenanceResult> =>
+    request<MaintenanceResult>(`/nodes/${id}/maintenance`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  // Both return a job; follow it with getJob / getJobLogs.
+  requestContainerLogs: (nodeId: string, name: string, lines = 200): Promise<{ job_id: string }> =>
+    request<{ job_id: string }>(`/nodes/${nodeId}/containers/${encodeURIComponent(name)}/logs?lines=${lines}`, { method: 'POST' }),
+
+  restartNodeContainer: (nodeId: string, name: string): Promise<{ job_id: string }> =>
+    request<{ job_id: string }>(`/nodes/${nodeId}/containers/${encodeURIComponent(name)}/restart`, { method: 'POST' }),
 
   startSystemUpdate: (): Promise<{ upgrading: string }> =>
     request<{ upgrading: string }>('/system/update', { method: 'POST' }),

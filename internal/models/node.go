@@ -34,7 +34,31 @@ type Node struct {
 	LoadAvg1      float64        `json:"load_avg_1"`
 	LoadAvg5      float64        `json:"load_avg_5"`
 	LoadAvg15     float64        `json:"load_avg_15"`
-	AgentVersion  string         `gorm:"size:20" json:"agent_version"`
+	AgentVersion  string         `gorm:"size:40" json:"agent_version"`
+	// Maintenance nodes get no new apps and are never failover targets;
+	// their apps are moved elsewhere when maintenance starts.
+	Maintenance      bool       `gorm:"not null;default:false" json:"maintenance"`
+	MaintenanceSince *time.Time `json:"maintenance_since,omitempty"`
+	MaintenanceBy    string     `gorm:"size:100" json:"maintenance_by,omitempty"`
+	// Containers is what the agent last reported running on the node.
+	Containers []NodeContainer `gorm:"serializer:json" json:"containers"`
+}
+
+// NodeContainer is one container as the node's agent reports it.
+type NodeContainer struct {
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	State     string `json:"state"`  // running, exited, restarting, ...
+	Status    string `json:"status"` // Docker's text, e.g. "Up 3 hours"
+	Ports     string `json:"ports"`
+	Managed   bool   `json:"managed"` // started by the Hub
+	ProjectID string `json:"project_id,omitempty"`
+}
+
+// Available limits a node query to nodes that can take apps: online and not
+// in maintenance.
+func Available(db *gorm.DB) *gorm.DB {
+	return db.Where("online = ? AND maintenance = ?", true, false)
 }
 
 type Heartbeat struct {

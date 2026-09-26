@@ -151,10 +151,10 @@ func (s *MigrationService) EnforceMasterNode(masterNodeID string) {
 
 	targetNodeID := masterNodeID
 
-	if !master.Online {
-		// Master is offline, find healthiest available node
+	if !master.Online || master.Maintenance {
+		// Master is offline or in maintenance, find healthiest available node
 		var healthiest models.Node
-		if err := s.db.Where("id != ? AND online = ?", masterNodeID, true).
+		if err := s.db.Scopes(models.Available).Where("id != ?", masterNodeID).
 			Order("health_score DESC").
 			First(&healthiest).Error; err != nil {
 			log.Printf("⚠️ EnforceMasterNode: no available nodes to migrate to")

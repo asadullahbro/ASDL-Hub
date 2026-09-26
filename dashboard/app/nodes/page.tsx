@@ -113,6 +113,11 @@ export default function NodesPage() {
                       {node.online ? 'Online' : 'Offline'}
                     </span>
                   </div>
+                  {node.maintenance && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent/15 text-accent">
+                      Maintenance
+                    </span>
+                  )}
                   <div className="flex items-center gap-1">
                     <Activity className="h-3 w-3 text-text-muted" />
                     <span className={`text-xs font-medium ${

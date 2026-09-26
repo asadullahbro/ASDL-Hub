@@ -58,6 +58,7 @@ exit 0
 
 func TestBuildDeployCommand_ExplicitPortsAndSecrets(t *testing.T) {
 	project := &models.Project{
+		ID:      "p-1",
 		Name:    "api",
 		Ports:   []string{"9000:8000"},
 		Volumes: []string{"/srv/api data:/data"},
@@ -75,6 +76,7 @@ func TestBuildDeployCommand_ExplicitPortsAndSecrets(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		"CALL", "run", "-d", "--name", "api", "--restart", "unless-stopped",
+		"--label", "asdl.managed=true", "--label", "asdl.project=p-1",
 		"-v", "/srv/api data:/data", "-e", `GREETING=it's "quoted" $HOME`, "-e", "PATH=/nope",
 		"-p", "9000:8000", "ghcr.io/o/api:abc",
 	}, "\n")
