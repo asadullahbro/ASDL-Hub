@@ -168,6 +168,7 @@ EOF
 ROUTES_DIR="/etc/nginx/asdl-hub.d"
 ACME_WEBROOT="/var/www/asdl-acme"
 CERT_HELPER="/usr/local/lib/asdl-hub/issue-cert"
+UPGRADE_HELPER="/usr/local/lib/asdl-hub/upgrade"
 
 setup_app_routing() {
     info "Configuring app routing..."
@@ -568,6 +569,7 @@ install_files() {
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/wg, /usr/sbin/ip
 $RUN_USER ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/bin/systemctl reload nginx
 $RUN_USER ALL=(root) NOPASSWD: /usr/local/lib/asdl-hub/issue-cert
+$RUN_USER ALL=(root) NOPASSWD: $UPGRADE_HELPER
 EOF
     chmod 440 /etc/sudoers.d/asdl-hub.tmp
     visudo -cf /etc/sudoers.d/asdl-hub.tmp >/dev/null || die "Generated sudoers rules are invalid."
@@ -575,6 +577,41 @@ EOF
 
     chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
+}
+
+# Lets the dashboard's "Update now" upgrade the Hub: given a release tag, it
+# downloads that release's installer from GitHub, checks it against the
+# release's SHA256SUMS and runs it as a separate systemd unit, so it keeps
+# going when the installer restarts the Hub.
+install_upgrade_helper() {
+    mkdir -p "$(dirname "$UPGRADE_HELPER")"
+    cat > "$UPGRADE_HELPER" <<'HELPER'
+#!/usr/bin/env bash
+# Installed by ASDL Hub. Usage: upgrade vX.Y.Z
+set -euo pipefail
+version="${1:-}"
+[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: $0 vX.Y.Z" >&2; exit 2; }
+if systemctl is-active --quiet asdl-hub-upgrade.service; then
+    echo "an upgrade is already running" >&2; exit 0
+fi
+systemctl reset-failed asdl-hub-upgrade.service 2>/dev/null || true
+exec systemd-run --unit=asdl-hub-upgrade --collect --quiet \
+    --setenv=ASDL_UPGRADE_VERSION="$version" \
+    /bin/bash -c '
+set -euo pipefail
+exec >/var/log/asdl-hub-upgrade.log 2>&1
+echo "Upgrading ASDL Hub to $ASDL_UPGRADE_VERSION at $(date -Is)"
+dir=$(mktemp -d); trap "rm -rf $dir" EXIT
+base="https://github.com/asadullahbro/ASDL-Hub/releases/download/$ASDL_UPGRADE_VERSION"
+curl -fsSL --retry 3 "$base/install.sh" -o "$dir/install.sh"
+curl -fsSL --retry 3 "$base/SHA256SUMS" -o "$dir/SHA256SUMS"
+(cd "$dir" && grep " install.sh\$" SHA256SUMS | sha256sum -c -)
+bash "$dir/install.sh" </dev/null
+echo "Upgrade to $ASDL_UPGRADE_VERSION finished at $(date -Is)"
+'
+HELPER
+    chown root:root "$UPGRADE_HELPER"
+    chmod 755 "$UPGRADE_HELPER"
 }
 
 setup_service() {
@@ -689,6 +726,7 @@ main() {
     setup_firewall
     setup_nginx
     setup_app_routing
+    install_upgrade_helper
     verify
     summary
 }

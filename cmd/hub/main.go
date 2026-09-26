@@ -36,6 +36,9 @@ type Config struct {
 	} `yaml:"database"`
 }
 
+// Version is set at build time (-ldflags "-X main.Version=v1.2.3").
+var Version = "dev"
+
 func main() {
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
@@ -114,6 +117,10 @@ func main() {
 	// Health service — periodic health checks with auto-failover on unhealthy projects
 	healthService := services.NewHealthService(database, migrationService, nginxService, deployer)
 	healthService.StartHealthChecker()
+
+	updateService := services.NewUpdateService(Version)
+	updateService.Start()
+	log.Printf("ASDL Hub %s", Version)
 
 	// Routes live in files nginx reads, so bring them in line with the
 	// database at startup (e.g. after an upgrade or a manual nginx change).
@@ -526,6 +533,9 @@ echo "Agent updated successfully"
 		// Admin only - Settings
 		settings := protected.Group("/settings")
 		settings.Use(middleware.RequireRole(models.RoleAdmin))
+		// Everyone signed in sees whether an update exists; admins install it.
+		protected.GET("/system/version", updateService.Status)
+		protected.POST("/system/update", middleware.RequireRole(models.RoleAdmin), updateService.Update)
 		{
 			settings.POST("/verify-password", settingsHandlers.VerifyPassword)
 			settings.GET("/tokens", settingsHandlers.ListTokens)

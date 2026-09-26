@@ -28,6 +28,18 @@ const API_BASE = typeof window !== 'undefined'
     ? `${window.location.origin}/api/v1`
     : '/api/v1';
 
+export interface SystemVersion {
+  current: string;
+  latest: string;
+  update_available: boolean;
+  release_url: string;
+  notes: string;
+  checked_at: string;
+  check_error: string;
+  can_update: boolean;
+  upgrading: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -79,6 +91,13 @@ async function request<T>(
 }
 
 export const api = {
+  // Hub version and updates
+  getSystemVersion: (): Promise<SystemVersion> =>
+    request<SystemVersion>('/system/version'),
+
+  startSystemUpdate: (): Promise<{ upgrading: string }> =>
+    request<{ upgrading: string }>('/system/update', { method: 'POST' }),
+
   // Auth
   login: (username: string, password: string): Promise<LoginResponse> =>
     request<LoginResponse>('/auth/login', {
