@@ -23,23 +23,23 @@ type JobPayload struct {
 }
 
 type Job struct {
-	ID          string         `gorm:"primaryKey;size:36" json:"id"`
-	NodeID      string         `gorm:"index;not null" json:"node_id"`
-	Type        string         `gorm:"size:50;not null" json:"type"`
-	Status      string         `gorm:"size:20;not null;default:pending" json:"status"`
-	Command     string         `gorm:"type:text" json:"command"`
-	Payload     *JobPayload    `gorm:"serializer:json" json:"payload,omitempty"`
-	WorkingDir  string         `gorm:"size:255" json:"working_dir"`
-	Environment []string       `gorm:"serializer:json" json:"environment"`
-	Logs        string         `gorm:"type:text" json:"logs"`
-	ExitCode    int            `json:"exit_code"`
-	Retries     int            `json:"retries"`
-	MaxRetries  int            `json:"max_retries"`
-	Timeout     int            `json:"timeout"`
-	CreatedAt   time.Time      `json:"created_at"`
-	StartedAt   *time.Time     `json:"started_at,omitempty"`
-	CompletedAt *time.Time     `json:"completed_at,omitempty"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	ID          string           `gorm:"primaryKey;size:36" json:"id"`
+	NodeID      string           `gorm:"index;not null" json:"node_id"`
+	Type        string           `gorm:"size:50;not null" json:"type"`
+	Status      string           `gorm:"size:20;not null;default:pending" json:"status"`
+	Command     string           `gorm:"type:text" json:"command"`
+	Payload     *JobPayload      `gorm:"serializer:json" json:"payload,omitempty"`
+	WorkingDir  string           `gorm:"size:255" json:"working_dir"`
+	Environment EncryptedStrings `gorm:"type:text" json:"environment"`
+	Logs        string           `gorm:"type:text" json:"logs"`
+	ExitCode    int              `json:"exit_code"`
+	Retries     int              `json:"retries"`
+	MaxRetries  int              `json:"max_retries"`
+	Timeout     int              `json:"timeout"`
+	CreatedAt   time.Time        `json:"created_at"`
+	StartedAt   *time.Time       `json:"started_at,omitempty"`
+	CompletedAt *time.Time       `json:"completed_at,omitempty"`
+	DeletedAt   gorm.DeletedAt   `gorm:"index" json:"-"`
 }
 
 const (

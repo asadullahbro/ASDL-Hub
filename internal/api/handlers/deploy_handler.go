@@ -21,12 +21,14 @@ import (
 type DeployHandler struct {
 	db       *gorm.DB
 	verifier *githuboidc.OIDCVerifier
+	deployer *services.Deployer
 }
 
-func NewDeployHandler(db *gorm.DB, hubAudience string) *DeployHandler {
+func NewDeployHandler(db *gorm.DB, hubAudience string, deployer *services.Deployer) *DeployHandler {
 	return &DeployHandler{
 		db:       db,
 		verifier: githuboidc.NewOIDCVerifier(hubAudience),
+		deployer: deployer,
 	}
 }
 
@@ -122,12 +124,19 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		return
 	}
 
-	if err := h.dispatch(project, deployment, node, req.Image); err != nil {
+	job, _, err := h.deployer.Dispatch(project, node, req.Image, services.DeployMeta{
+		Trigger:    services.TriggerCI,
+		Repository: claims.Repository,
+		Branch:     claims.Ref,
+		Commit:     claims.SHA,
+	})
+	if err != nil {
 		h.markStatus(deployment.ID, "failed", err.Error())
 		slog.Error("dispatch failed", "error", err, "node_id", node.ID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to dispatch deployment"})
 		return
 	}
+	h.db.Model(deployment).Update("job_id", job.ID)
 
 	h.markStatus(deployment.ID, "dispatched", "")
 
@@ -160,6 +169,7 @@ func (h *DeployHandler) findOrCreateProject(claims *githuboidc.OIDCClaims, image
 		Name:         strings.ToLower(repoName),
 		Repository:   claims.Repository,
 		Image:        image,
+		AutoPort:     true,
 		Status:       "deploying",
 		HealthStatus: "unknown",
 		LastDeployed: time.Now(),
@@ -204,66 +214,6 @@ func (h *DeployHandler) bestNode() (*models.Node, error) {
 		return nil, fmt.Errorf("no online nodes available")
 	}
 	return &node, nil
-}
-
-func (h *DeployHandler) dispatch(project *models.Project, deployment *models.OIDCDeployment, node *models.Node, image string) error {
-	containerName := project.Name
-
-	// The registry token reaches the node as an environment variable so it is
-	// not stored in the job's command or echoed into the job logs.
-	var env []string
-	if strings.HasPrefix(image, "ghcr.io/") {
-		var token models.GitHubToken
-		if h.db.Order("created_at desc").First(&token).Error == nil {
-			env = append(env, services.RegistryTokenEnv+"="+token.Token)
-		}
-	}
-	command := services.BuildDeployCommand(project, image, len(env) > 0)
-
-	job := &models.Job{
-		ID:          uuid.New().String(),
-		NodeID:      node.ID,
-		Type:        models.JobTypeDeploy,
-		Status:      models.JobStatusPending,
-		Command:     command,
-		Environment: env,
-		MaxRetries:  1,
-		CreatedAt:   time.Now(),
-	}
-	if err := h.db.Create(job).Error; err != nil {
-		return fmt.Errorf("failed to create deploy job: %w", err)
-	}
-
-	dep := &models.Deployment{
-		ID:            uuid.New().String(),
-		JobID:         job.ID,
-		NodeID:        node.ID,
-		Repository:    deployment.Repository,
-		Branch:        deployment.Ref,
-		Commit:        deployment.SHA,
-		ImageName:     image,
-		ContainerName: containerName,
-		Ports:         project.PortMappings(),
-		Volumes:       project.Volumes,
-		Type:          models.DeploymentTypeDocker,
-		Status:        models.DeploymentStatusPending,
-		CreatedAt:     time.Now(),
-	}
-	if err := h.db.Create(dep).Error; err != nil {
-		return fmt.Errorf("failed to create deployment record: %w", err)
-	}
-	h.db.Model(&models.OIDCDeployment{}).Where("id = ?", deployment.ID).Update("job_id", job.ID)
-	// Status is left alone: a running project keeps serving (and keeps its
-	// nginx route) until JobService.Complete records the outcome.
-	h.db.Model(project).Update("deployment_id", dep.ID)
-
-	slog.Info("deploy job created",
-		"job_id", job.ID,
-		"project_id", project.ID,
-		"node_id", node.ID,
-		"image", image,
-	)
-	return nil
 }
 
 func (h *DeployHandler) markStatus(id, status, errMsg string) {

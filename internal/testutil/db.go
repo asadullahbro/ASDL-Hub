@@ -10,6 +10,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/asdl/hub/internal/models"
 )
 
 // NewDB opens a fresh in-memory SQLite database and migrates the given
@@ -19,6 +21,10 @@ import (
 // otherwise let same-named in-memory databases leak state between tests.
 func NewDB(t *testing.T, dst ...interface{}) *gorm.DB {
 	t.Helper()
+
+	if err := models.SetSecretsKey("test-secrets-key"); err != nil {
+		t.Fatalf("failed to set secrets key: %v", err)
+	}
 
 	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", t.Name(), time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{

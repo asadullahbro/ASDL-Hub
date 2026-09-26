@@ -65,11 +65,20 @@ func main() {
 
 	// auth initialization
 	jwtSecret := os.Getenv("JWT_SECRET")
+
+	// Project secrets are encrypted with SECRETS_KEY, or with a key derived
+	// from JWT_SECRET when it isn't set. Set SECRETS_KEY before rotating
+	// JWT_SECRET, or stored secrets become unreadable.
+	secretsKey := getEnv("SECRETS_KEY", jwtSecret)
+	if err := models.SetSecretsKey(secretsKey); err != nil {
+		log.Fatalf("Set JWT_SECRET or SECRETS_KEY: %v", err)
+	}
 	authService := services.NewAuthService(database, jwtSecret)
 	authHandlers := handlers.NewAuthHandlers(authService)
 
 	// github handler
-	deployHandler := handlers.NewDeployHandler(database, cfg.Server.HubURL)
+	deployer := services.NewDeployer(database)
+	deployHandler := handlers.NewDeployHandler(database, cfg.Server.HubURL, deployer)
 
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
@@ -85,7 +94,8 @@ func main() {
 	containerService := services.NewContainerService(database)
 
 	// Project service — tracks running projects and their health state
-	projectService := services.NewProjectService(database)
+	projectService := services.NewProjectService(database, deployer)
+	projectService.RepairInvalidPorts()
 
 	// Regenerate nginx when a deploy or project edit changes where a domain points
 	updateRoutes := func() {
@@ -97,11 +107,11 @@ func main() {
 	projectService.SetRoutesChangedHook(updateRoutes)
 
 	// Migration service — handles container migrations between nodes
-	migrationService := services.NewMigrationService(database, jobService, nginxService)
+	migrationService := services.NewMigrationService(database, jobService, nginxService, deployer)
 	migrationService.StartMigrationSweeper()
 
 	// Health service — periodic health checks with auto-failover on unhealthy projects
-	healthService := services.NewHealthService(database, migrationService, nginxService)
+	healthService := services.NewHealthService(database, migrationService, nginxService, deployer)
 	healthService.StartHealthChecker()
 
 	// Settings service and handler
@@ -473,6 +483,7 @@ echo "Agent updated successfully"
 			operator.POST("/projects", projectService.CreateProject)
 			operator.PUT("/projects/:id", projectService.UpdateProject)
 			operator.DELETE("/projects/:id", projectService.DeleteProject)
+			operator.POST("/projects/:id/redeploy", projectService.Redeploy)
 
 			operator.POST("/migrations", migrationService.MigrateProject)
 
