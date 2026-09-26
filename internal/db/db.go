@@ -35,10 +35,9 @@ func Init(dsn string) (*gorm.DB, error) {
 
 	// Older versions made repository unique even when empty, so only one
 	// project without a repository could exist.
-	if db.Migrator().HasIndex(&models.Project{}, "idx_projects_repository") {
-		if err := db.Migrator().DropIndex(&models.Project{}, "idx_projects_repository"); err != nil {
-			log.Printf("⚠️ Could not drop old projects.repository index: %v", err)
-		}
+	// (gorm's Migrator().DropIndex emits invalid SQL on PostgreSQL 12.)
+	if err := db.Exec("DROP INDEX IF EXISTS idx_projects_repository").Error; err != nil {
+		log.Printf("⚠️ Could not drop old projects.repository index: %v", err)
 	}
 
 	if err := db.AutoMigrate(
