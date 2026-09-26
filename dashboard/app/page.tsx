@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
-import { Stats, Job } from '@/types';
+import { Stats, Job, Node } from '@/types';
 
 const POLL_INTERVAL = 10_000;
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [nodeNames, setNodeNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,12 +18,14 @@ export default function DashboardPage() {
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [statsData, jobsResponse] = await Promise.all([
+      const [statsData, jobsResponse, nodes] = await Promise.all([
         api.getStats(),
-        api.getJobs(1, 20),
+        api.getJobs(1, 8),
+        api.getNodes().catch((): Node[] => []),
       ]);
       setStats(statsData);
       setJobs(jobsResponse.data ?? []);
+      setNodeNames(Object.fromEntries((nodes ?? []).map(n => [n.id, n.hostname])));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -63,7 +66,7 @@ export default function DashboardPage() {
     );
   }
 
-  const recentJobs = jobs.slice(0, 5);
+  const recentJobs = jobs.slice(0, 8);
 
   return (
     <div className="space-y-5">
@@ -118,14 +121,16 @@ export default function DashboardPage() {
       {/* Recent jobs */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium text-text-primary">Recent migrations</span>
-          <a href="/migrations" className="text-xs text-accent hover:underline">View all</a>
+          <span className="text-xs font-medium text-text-primary">Recent jobs</span>
+          <a href="/jobs" className="text-xs text-accent hover:underline">View all</a>
         </div>
         <div className="bg-surface border border-border rounded-lg divide-y divide-border">
           {recentJobs.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-text-muted">No migrations yet</div>
+            <div className="px-4 py-6 text-center text-xs text-text-muted">No jobs yet</div>
           ) : (
-            recentJobs.map((job) => <MigrationRow key={job.id} job={job} />)
+            recentJobs.map((job) => (
+              <JobRow key={job.id} job={job} nodeName={nodeNames[job.node_id]} />
+            ))
           )}
         </div>
       </div>
@@ -158,7 +163,26 @@ function StatCard({
   );
 }
 
-function MigrationRow({ job }: { job: Job }) {
+const jobTypeLabels: Record<string, string> = {
+  deploy: 'Deploy',
+  failover_stop: 'Remove old copy',
+  failover_start: 'Failover',
+  migrate_start: 'Migrate in',
+  migrate_stop: 'Migrate out',
+  image_pull: 'Pull image',
+  agent_update: 'Agent update',
+  command: 'Command',
+};
+
+// The app a job acts on, read from its docker command (e.g. --name 'api').
+function jobTarget(job: Job): string | undefined {
+  const m =
+    job.command?.match(/--name '([^']+)'/) ??
+    job.command?.match(/docker (?:rm -f|stop|start|restart) '?([\w.-]+)'?/);
+  return m?.[1] ?? job.payload?.container_name ?? job.payload?.image;
+}
+
+function JobRow({ job, nodeName }: { job: Job; nodeName?: string }) {
   const statusMap: Record<string, { label: string; className: string }> = {
     completed: { label: 'done',      className: 'bg-green-500/10 text-status-green border border-green-500/20' },
     running:   { label: 'running',   className: 'bg-accent/10 text-accent border border-accent/20' },
@@ -168,12 +192,11 @@ function MigrationRow({ job }: { job: Job }) {
   };
 
   const s = statusMap[job.status] ?? statusMap.pending;
-  const title = job.payload?.container_name ?? job.payload?.image ?? job.type;
-  const meta = job.payload?.source_node_ip
-    ? `${job.payload.source_node_ip} · ${job.node_id}`
-    : job.node_id;
+  const target = jobTarget(job);
+  const title = `${jobTypeLabels[job.type] ?? job.type}${target ? ` · ${target}` : ''}`;
+  const meta = nodeName ?? job.node_id.slice(0, 8);
   const time = job.created_at
-    ? new Date(job.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    ? new Date(job.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—';
 
   return (
