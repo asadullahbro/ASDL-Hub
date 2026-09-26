@@ -119,3 +119,35 @@ func TestDeleteProject_RemovesContainerAndCancelsPendingDeploys(t *testing.T) {
 		t.Errorf("containers must be removed from good and ok, got %v", got)
 	}
 }
+
+func TestCreateProject_LinkedToRepoWaitsOnItsNodeForCI(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	svc := NewProjectService(db, NewDeployer(db))
+
+	c, w := newTestContext(http.MethodPost, "/projects", `{"name":"bot","node_id":"ok","repository":"o/bot"}`)
+	svc.CreateProject(c)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var p models.Project
+	db.First(&p, "name = ?", "bot")
+	if p.Repository != "o/bot" || p.NodeID != "ok" || p.Status != "stopped" {
+		t.Errorf("project = repo %q node %q status %q; want o/bot, ok, stopped", p.Repository, p.NodeID, p.Status)
+	}
+	var jobs int64
+	db.Model(&models.Job{}).Count(&jobs)
+	if jobs != 0 {
+		t.Errorf("nothing to deploy yet, got %d jobs", jobs)
+	}
+
+	c, w = newTestContext(http.MethodPost, "/projects", `{"name":"bot2","node_id":"ok","repository":"o/bot"}`)
+	svc.CreateProject(c)
+	if w.Code != http.StatusConflict {
+		t.Errorf("a repo can only belong to one project: %d", w.Code)
+	}
+	c, w = newTestContext(http.MethodPost, "/projects", `{"name":"bot3","node_id":"ok","repository":"not a repo"}`)
+	svc.CreateProject(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("invalid repository: %d", w.Code)
+	}
+}

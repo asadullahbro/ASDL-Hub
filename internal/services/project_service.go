@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -108,6 +109,8 @@ func (s *ProjectService) GetProjectsByNode(c *gin.Context) {
 	c.JSON(http.StatusOK, projects)
 }
 
+var repoRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+
 func (s *ProjectService) CreateProject(c *gin.Context) {
 	var req struct {
 		Name        string          `json:"name" binding:"required"`
@@ -118,6 +121,9 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		Ports       []string        `json:"ports"`
 		EnvVars     []models.EnvVar `json:"env_vars"`
 		Volumes     []string        `json:"volumes"`
+		// Repository ("owner/repo") links GitHub Actions deploys from that
+		// repo to this project instead of creating a new one.
+		Repository string `json:"repository"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -128,6 +134,18 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Repository != "" {
+		if !repoRe.MatchString(req.Repository) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository must look like owner/repo"})
+			return
+		}
+		var n int64
+		s.db.Model(&models.Project{}).Where("repository = ?", req.Repository).Count(&n)
+		if n > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "another project already uses " + req.Repository})
+			return
+		}
+	}
 
 	var node models.Node
 	if err := s.db.First(&node, "id = ?", req.NodeID).Error; err != nil {
@@ -137,15 +155,20 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 
 	// Nothing runs yet: with an image the project is deployed to the chosen
 	// node right away and becomes "running" (with that node) once it starts.
+	// Without one, the node is where its first deploy (e.g. from CI) goes.
 	status := "stopped"
+	nodeID := node.ID
 	if req.Image != "" {
 		status = "deploying"
+		nodeID = ""
 	}
 	project := &models.Project{
 		ID:           uuid.New().String(),
 		Name:         req.Name,
 		Description:  req.Description,
 		Domain:       req.Domain,
+		Repository:   req.Repository,
+		NodeID:       nodeID,
 		Status:       status,
 		HealthStatus: "unknown",
 		Image:        req.Image,
