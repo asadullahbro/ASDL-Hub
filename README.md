@@ -31,7 +31,7 @@ machine automatically if its own goes down.
 
 ## Features
 
-| | |
+| Feature | What it does |
 |---|---|
 | **Deploy from GitHub Actions** | Push to your repo and the app updates. The Hub verifies the workflow with GitHub OIDC — no deploy keys to manage, and a repo can only deploy its own image. |
 | **Encrypted secrets** | Paste your `.env` into the dashboard. Values are encrypted at rest, masked in the UI and API, and only reach the container when it starts. |
