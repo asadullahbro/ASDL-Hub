@@ -271,12 +271,15 @@ export default function ProjectsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs">📦</span>
-                    <span className="text-xs font-mono">{project.image || 'N/A'}</span>
+                    <span className="text-xs font-mono break-all">{project.image || 'N/A'}</span>
                   </div>
                   {project.ports && project.ports.length > 0 && (
                     <div className="flex items-center gap-2">
                       <span className="text-xs">🔌</span>
-                      <span className="text-xs font-mono">{project.ports.join(', ')}</span>
+                      <span className="text-xs font-mono">
+                        {project.ports.join(', ')}
+                        {project.auto_port && <span className="text-text-muted font-sans"> (auto)</span>}
+                      </span>
                     </div>
                   )}
                   <div className="flex items-center gap-2">

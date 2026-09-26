@@ -164,7 +164,7 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 
 	if req.Image != "" {
 		if _, _, err := s.deployer.Dispatch(project, &node, req.Image, DeployMeta{
-			Trigger:    TriggerMigration,
+			Trigger:    TriggerManual,
 			Repository: project.Repository,
 		}); err != nil {
 			log.Printf("⚠️ Created %s but could not deploy it: %v", project.Name, err)
@@ -306,7 +306,7 @@ func (s *ProjectService) redeploy(project *models.Project) (*models.Job, error) 
 		}
 	}
 	job, _, err := s.deployer.Dispatch(project, &node, project.Image, DeployMeta{
-		Trigger:    TriggerMigration,
+		Trigger:    TriggerManual,
 		Repository: project.Repository,
 	})
 	return job, err

@@ -20,6 +20,9 @@ const (
 	TriggerCI        = "ci"
 	TriggerFailover  = "failover"
 	TriggerMigration = "migration"
+	// TriggerManual covers deploys started from the dashboard or API:
+	// creating a project, changing its config, or pressing Redeploy.
+	TriggerManual = "manual"
 )
 
 // DeployMeta describes where a deploy came from, for the deployment record.
