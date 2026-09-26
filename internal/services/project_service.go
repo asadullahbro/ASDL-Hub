@@ -1,7 +1,10 @@
 package services
 
 import (
+	"fmt"
+	"log"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -13,14 +16,15 @@ import (
 )
 
 type ProjectService struct {
-	db *gorm.DB
+	db       *gorm.DB
+	deployer *Deployer
 	// onRoutesChanged is called after a project's domain, port or node may
 	// have changed, so nginx can be regenerated. Optional.
 	onRoutesChanged func()
 }
 
-func NewProjectService(db *gorm.DB) *ProjectService {
-	return &ProjectService{db: db}
+func NewProjectService(db *gorm.DB, deployer *Deployer) *ProjectService {
+	return &ProjectService{db: db, deployer: deployer}
 }
 
 // SetRoutesChangedHook registers fn to run (in the background) after a
@@ -32,6 +36,22 @@ func (s *ProjectService) SetRoutesChangedHook(fn func()) {
 func (s *ProjectService) routesChanged() {
 	if s.onRoutesChanged != nil {
 		go s.onRoutesChanged()
+	}
+}
+
+// RepairInvalidPorts switches projects whose saved port mappings can't be
+// used (such as "0000:8000") to automatic ports, so their next deploy works.
+func (s *ProjectService) RepairInvalidPorts() {
+	var projects []models.Project
+	s.db.Find(&projects)
+	for _, p := range projects {
+		for _, m := range p.Ports {
+			if _, _, err := models.ParsePortMapping(m); err != nil {
+				log.Printf("🔧 Project %s had an invalid port mapping %q; switching it to automatic ports", p.Name, m)
+				s.db.Model(&p).Select("ports", "auto_port").Updates(&models.Project{Ports: []string{}, AutoPort: true})
+				break
+			}
+		}
 	}
 }
 
@@ -125,6 +145,7 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		HealthStatus: "unknown",
 		Image:        req.Image,
 		Ports:        req.Ports,
+		AutoPort:     len(req.Ports) == 0,
 		EnvVars:      req.EnvVars,
 		Volumes:      req.Volumes,
 		LastDeployed: time.Now(),
@@ -184,11 +205,15 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	if req.Image != "" {
 		project.Image = req.Image
 	}
+	before := containerConfig(&project)
 	if req.Ports != nil {
+		// An empty list hands the port back to the hub to choose.
 		project.Ports = req.Ports
+		project.AutoPort = len(req.Ports) == 0
 	}
 	if req.EnvVars != nil {
-		project.EnvVars = req.EnvVars
+		// Clients get values back masked; a masked value means "unchanged".
+		project.EnvVars = models.MergeMasked(req.EnvVars, project.EnvVars)
 	}
 	if req.Volumes != nil {
 		project.Volumes = req.Volumes
@@ -202,7 +227,55 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 
 	s.db.Save(&project)
 	s.routesChanged()
+	// Containers only read their config at start, so apply it now.
+	if !reflect.DeepEqual(before, containerConfig(&project)) {
+		if _, err := s.redeploy(&project); err != nil {
+			log.Printf("⚠️ Config of %s changed but it could not be redeployed yet: %v", project.Name, err)
+		}
+	}
 	c.JSON(http.StatusOK, project)
+}
+
+// containerConfig is the part of a project a running container has baked in.
+func containerConfig(p *models.Project) []interface{} {
+	return []interface{}{
+		append([]string{}, p.Ports...), p.AutoPort,
+		append([]models.EnvVar{}, p.EnvVars...),
+		append([]string{}, p.Volumes...),
+	}
+}
+
+// Redeploy handles POST /projects/:id/redeploy: restart the project's current
+// image on its node with its current config.
+func (s *ProjectService) Redeploy(c *gin.Context) {
+	var project models.Project
+	if err := s.db.First(&project, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+	job, err := s.redeploy(&project)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "node_id": job.NodeID})
+}
+
+func (s *ProjectService) redeploy(project *models.Project) (*models.Job, error) {
+	if project.Image == "" {
+		return nil, fmt.Errorf("project has no image yet; deploy it from CI first")
+	}
+	var node models.Node
+	if err := s.db.First(&node, "id = ? AND online = ?", project.NodeID, true).Error; err != nil {
+		if err := s.db.Where("online = ?", true).Order("health_score desc").First(&node).Error; err != nil {
+			return nil, fmt.Errorf("no online node to run it on")
+		}
+	}
+	job, _, err := s.deployer.Dispatch(project, &node, project.Image, DeployMeta{
+		Trigger:    TriggerMigration,
+		Repository: project.Repository,
+	})
+	return job, err
 }
 
 func (s *ProjectService) UpdateProjectStatus(c *gin.Context) {

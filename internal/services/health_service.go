@@ -21,16 +21,18 @@ type HealthService struct {
 	db               *gorm.DB
 	migrationService *MigrationService
 	nginxService     *NginxService
+	deployer         *Deployer
 	// failures counts consecutive failed checks per project ID. Only the
 	// checker goroutine touches it.
 	failures map[string]int
 }
 
-func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService) *HealthService {
+func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService, deployer *Deployer) *HealthService {
 	return &HealthService{
 		db:               db,
 		migrationService: migrationService,
 		nginxService:     nginxService,
+		deployer:         deployer,
 		failures:         make(map[string]int),
 	}
 }
@@ -103,119 +105,100 @@ func (s *HealthService) checkProjectHealth(project *models.Project) bool {
 	return false
 }
 
+// failoverCooldown is how long a node that failed to take over a project is
+// skipped as a failover target for that project.
+const failoverCooldown = 30 * time.Minute
+
+// handleUnhealthyProject redeploys the project on the healthiest other online
+// node. Nodes that already failed to take it over recently are skipped; only
+// when no node is left is the project marked failed.
 func (s *HealthService) handleUnhealthyProject(project *models.Project) {
-	var sourceNode models.Node
-	if err := s.db.First(&sourceNode, "id = ?", project.NodeID).Error; err != nil {
-		log.Printf("❌ Failed to get source node: %v", err)
+	var active int64
+	s.db.Model(&models.Migration{}).
+		Where("project_id = ? AND status IN ?", project.ID,
+			[]string{models.MigrationStatusPending, models.MigrationStatusRunning}).
+		Count(&active)
+	if active > 0 {
+		log.Printf("⏳ %s already has a failover in progress", project.Name)
 		return
 	}
 
-	var nodes []models.Node
-	s.db.Where("online = ? AND id != ?", true, project.NodeID).Find(&nodes)
-
-	if len(nodes) == 0 {
-		log.Printf("❌ No healthy nodes available for failover of %s", project.Name)
-		project.Status = "failed"
-		project.HealthStatus = "unhealthy"
-		s.db.Save(project)
+	image := project.Image
+	if image == "" {
+		log.Printf("❌ %s has no image to fail over with", project.Name)
+		s.markFailed(project)
 		return
 	}
 
-	targetNode := s.findHealthiestNode(nodes)
-	log.Printf("🔄 Auto-failover: %s (%s) -> %s (%s)",
-		project.Name,
-		sourceNode.Hostname,
-		targetNode.Hostname,
-		targetNode.VPNIP)
+	target := s.failoverTarget(project)
+	if target == nil {
+		log.Printf("❌ No node left to run %s; marking it failed", project.Name)
+		s.markFailed(project)
+		return
+	}
 
+	log.Printf("🔄 Failing over %s: %s -> %s", project.Name, project.NodeID, target.Hostname)
+	job, _, err := s.deployer.Dispatch(project, target, image, DeployMeta{
+		Trigger:    TriggerFailover,
+		Repository: project.Repository,
+	})
+	if err != nil {
+		log.Printf("❌ Failed to dispatch failover of %s: %v", project.Name, err)
+		return
+	}
+
+	now := time.Now()
 	migration := &models.Migration{
 		ID:           uuid.New().String(),
 		ProjectID:    project.ID,
 		ContainerID:  project.ContainerID,
-		SourceNodeID: sourceNode.ID,
-		TargetNodeID: targetNode.ID,
-		Status:       models.MigrationStatusPending,
-		CreatedAt:    time.Now(),
+		SourceNodeID: project.NodeID,
+		TargetNodeID: target.ID,
+		Status:       models.MigrationStatusRunning,
+		JobID:        job.ID,
+		CreatedAt:    now,
 	}
-
 	if err := s.db.Create(migration).Error; err != nil {
-		log.Printf("❌ Failed to create migration for failover: %v", err)
-		return
+		log.Printf("⚠️ Failed to record failover of %s: %v", project.Name, err)
 	}
-
-	// Stop on source (if online)
-	if sourceNode.Online {
-		stopJob := &models.Job{
-			ID:     uuid.New().String(),
-			NodeID: sourceNode.ID,
-			Type:   models.JobTypeFailoverStop,
-			Status: models.JobStatusPending,
-			Payload: &models.JobPayload{
-				ContainerName: project.Name,
-				Operation:     "stop",
-			},
-			MaxRetries: 2,
-			CreatedAt:  time.Now(),
-		}
-		if err := s.db.Create(stopJob).Error; err != nil {
-			log.Printf("❌ Failed to create stop job: %v", err)
-		} else {
-			log.Printf("🛑 Stop job created on %s", sourceNode.Hostname)
-		}
-	}
-
-	// Pull image on target (if token exists)
-	// Start on target
-	startJob := &models.Job{
-		ID:     uuid.New().String(),
-		NodeID: targetNode.ID,
-		Type:   models.JobTypeFailoverStart,
-		Status: models.JobStatusPending,
-		Payload: &models.JobPayload{
-			ContainerName: project.Name,
-			Image:         project.Image,
-			Ports:         project.Ports,
-			Volumes:       project.Volumes,
-			EnvVars:       project.EnvVars,
-			Operation:     "start",
-		},
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
-	}
-
-	if err := s.db.Create(startJob).Error; err != nil {
-		log.Printf("❌ Failed to create failover job: %v", err)
-		return
-	}
-
-	migration.JobID = startJob.ID
-	s.db.Save(migration)
-
-	project.NodeID = targetNode.ID
-	project.Status = "running"
-	project.HealthStatus = "degraded"
-	s.db.Save(project)
-
-	if err := s.nginxService.UpdateNginxConfig(); err != nil {
-		log.Printf("⚠️ Failed to update Nginx config: %v", err)
-	}
-
-	log.Printf("✅ Failover initiated: %s -> %s (job: %s)",
-		project.Name, targetNode.Hostname, startJob.ID)
+	s.db.Model(project).Update("health_status", "migrating")
 }
 
-func (s *HealthService) findHealthiestNode(nodes []models.Node) *models.Node {
+// failoverTarget returns the best online node for project other than its
+// current one, preferring the master node, or nil if there is none.
+func (s *HealthService) failoverTarget(project *models.Project) *models.Node {
+	var failed []string
+	s.db.Model(&models.Migration{}).
+		Where("project_id = ? AND status = ? AND created_at > ?", project.ID,
+			models.MigrationStatusFailed, time.Now().Add(-failoverCooldown)).
+		Pluck("target_node_id", &failed)
+
+	q := s.db.Where("online = ? AND id != ?", true, project.NodeID)
+	if len(failed) > 0 {
+		q = q.Where("id NOT IN ?", failed)
+	}
+	var nodes []models.Node
+	q.Order("health_score desc").Find(&nodes)
 	if len(nodes) == 0 {
 		return nil
 	}
 
-	var bestNode *models.Node
-	for i := range nodes {
-		if bestNode == nil || nodes[i].LastHeartbeat.After(bestNode.LastHeartbeat) {
-			bestNode = &nodes[i]
+	var master models.Setting
+	if s.db.First(&master, "key = ?", "master_node_id").Error == nil {
+		for i := range nodes {
+			if nodes[i].ID == master.Value {
+				return &nodes[i]
+			}
 		}
 	}
-	return bestNode
+	return &nodes[0]
+}
+
+func (s *HealthService) markFailed(project *models.Project) {
+	s.db.Model(project).Updates(map[string]interface{}{"status": "failed", "health_status": "unhealthy"})
+	if err := s.nginxService.UpdateNginxConfig(); err != nil {
+		log.Printf("⚠️ Failed to update Nginx config: %v", err)
+	}
 }
 
 func (s *HealthService) GetProjectHealth(c *gin.Context) {

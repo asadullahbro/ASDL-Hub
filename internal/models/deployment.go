@@ -6,7 +6,10 @@ import (
 )
 
 type Deployment struct {
-	ID         string `gorm:"primaryKey;size:36" json:"id"`
+	ID        string `gorm:"primaryKey;size:36" json:"id"`
+	ProjectID string `gorm:"index" json:"project_id"`
+	// Trigger is what started the deploy: "ci", "failover" or "migration".
+	Trigger    string `gorm:"size:20" json:"trigger"`
 	Repository string `gorm:"size:255;not null" json:"repository"`
 	Branch     string `gorm:"size:100;not null" json:"branch"`
 	Commit     string `gorm:"size:40" json:"commit"`

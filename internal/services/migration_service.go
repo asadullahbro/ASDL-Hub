@@ -1,10 +1,10 @@
 package services
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,22 +18,16 @@ type MigrationService struct {
 	db           *gorm.DB
 	jobService   *JobService
 	nginxService *NginxService
+	deployer     *Deployer
 }
 
-func NewMigrationService(db *gorm.DB, jobService *JobService, nginxService *NginxService) *MigrationService {
+func NewMigrationService(db *gorm.DB, jobService *JobService, nginxService *NginxService, deployer *Deployer) *MigrationService {
 	return &MigrationService{
 		db:           db,
 		jobService:   jobService,
 		nginxService: nginxService,
+		deployer:     deployer,
 	}
-}
-
-func (s *MigrationService) getGitHubToken() string {
-	var token models.GitHubToken
-	if err := s.db.First(&token).Error; err == nil && token.Token != "" {
-		return token.Token
-	}
-	return ""
 }
 
 func (s *MigrationService) StartMigrationSweeper() {
@@ -56,6 +50,13 @@ func (s *MigrationService) cleanupStuckMigrations() {
 		log.Printf("⚠️ Found stuck migration: %s (created: %v)", migration.ID, migration.CreatedAt)
 		migration.Status = models.MigrationStatusFailed
 		s.db.Save(&migration)
+		// If the target never picked the job up, make sure it doesn't start
+		// a stray copy when it comes back.
+		if migration.JobID != "" {
+			s.db.Model(&models.Job{}).
+				Where("id = ? AND status = ?", migration.JobID, models.JobStatusPending).
+				Update("status", models.JobStatusCancelled)
+		}
 	}
 }
 
@@ -94,96 +95,42 @@ func (s *MigrationService) MigrateToNode(projectID, targetNodeID string) {
 		return
 	}
 
+	migration, err := s.startMigration(&project, &sourceNode, &targetNode)
+	if err != nil {
+		log.Printf("⚠️ MigrateToNode: %v", err)
+		return
+	}
+	log.Printf("🎯 Master enforcement migration %s: %s → %s", migration.ID, sourceNode.Hostname, targetNode.Hostname)
+}
+
+// startMigration redeploys project on target and records the migration. The
+// old container is removed only once the new one runs (JobService.Complete).
+func (s *MigrationService) startMigration(project *models.Project, source, target *models.Node) (*models.Migration, error) {
+	if project.Image == "" {
+		return nil, fmt.Errorf("project %s has no image to migrate", project.Name)
+	}
+	job, _, err := s.deployer.Dispatch(project, target, project.Image, DeployMeta{
+		Trigger:    TriggerMigration,
+		Repository: project.Repository,
+	})
+	if err != nil {
+		return nil, err
+	}
 	migration := &models.Migration{
 		ID:           uuid.New().String(),
 		ProjectID:    project.ID,
 		ContainerID:  project.ContainerID,
-		SourceNodeID: sourceNode.ID,
-		TargetNodeID: targetNode.ID,
-		Status:       models.MigrationStatusPending,
+		SourceNodeID: source.ID,
+		TargetNodeID: target.ID,
+		Status:       models.MigrationStatusRunning,
+		JobID:        job.ID,
 		CreatedAt:    time.Now(),
 	}
 	if err := s.db.Create(migration).Error; err != nil {
-		log.Printf("⚠️ MigrateToNode: failed to create migration record: %v", err)
-		return
+		return nil, fmt.Errorf("failed to record migration: %w", err)
 	}
-
-	// Stop on source
-	if sourceNode.Online {
-		stopJob := &models.Job{
-			ID:     uuid.New().String(),
-			NodeID: sourceNode.ID,
-			Type:   models.JobTypeMigrateStop,
-			Status: models.JobStatusPending,
-			Payload: &models.JobPayload{
-				ContainerName: project.Name,
-				Operation:     "stop",
-			},
-			MaxRetries: 2,
-			CreatedAt:  time.Now(),
-		}
-		s.db.Create(stopJob)
-	}
-
-	// Pull image on target
-	token := s.getGitHubToken()
-	if token != "" {
-		pullJob := &models.Job{
-			ID:     uuid.New().String(),
-			NodeID: targetNode.ID,
-			Type:   models.JobTypeImagePull,
-			Status: models.JobStatusPending,
-			Payload: &models.JobPayload{
-				ContainerName: project.Name,
-				Image:         project.Image,
-				Repository:    strings.Split(project.Image, ":")[0],
-				Operation:     "pull",
-			},
-			MaxRetries: 3,
-			CreatedAt:  time.Now(),
-		}
-		if err := s.db.Create(pullJob).Error; err != nil {
-			log.Printf("⚠️ MigrateToNode: failed to create pull job: %v", err)
-			return
-		}
-		log.Printf("📥 Pull job created: %s on %s", pullJob.ID, targetNode.Hostname)
-	}
-
-	// Start on target
-	startJob := &models.Job{
-		ID:     uuid.New().String(),
-		NodeID: targetNode.ID,
-		Type:   models.JobTypeMigrateStart,
-		Status: models.JobStatusPending,
-		Payload: &models.JobPayload{
-			ContainerName: project.Name,
-			Image:         project.Image,
-			Ports:         project.Ports,
-			Volumes:       project.Volumes,
-			EnvVars:       project.EnvVars,
-			Operation:     "start",
-			SourceNodeIP:  sourceNode.VPNIP,
-		},
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
-	}
-	if err := s.db.Create(startJob).Error; err != nil {
-		log.Printf("⚠️ MigrateToNode: failed to create start job: %v", err)
-		return
-	}
-
-	project.NodeID = targetNode.ID
-	s.db.Save(&project)
-
-	migration.JobID = startJob.ID
-	migration.Status = models.MigrationStatusRunning
-	s.db.Save(&migration)
-
-	if err := s.nginxService.UpdateNginxConfig(); err != nil {
-		log.Printf("⚠️ MigrateToNode: nginx update failed: %v", err)
-	}
-
-	log.Printf("🎯 Master enforcement migration: %s → %s", sourceNode.Hostname, targetNode.Hostname)
+	s.db.Model(project).Update("health_status", "migrating")
+	return migration, nil
 }
 
 func (s *MigrationService) EnforceMasterNode(masterNodeID string) {
@@ -279,117 +226,17 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 		return
 	}
 
-	// Create migration record
-	migration := &models.Migration{
-		ID:           uuid.New().String(),
-		ProjectID:    project.ID,
-		ContainerID:  project.ContainerID,
-		SourceNodeID: sourceNode.ID,
-		TargetNodeID: targetNode.ID,
-		Status:       models.MigrationStatusPending,
-		CreatedAt:    time.Now(),
-	}
-
-	if err := s.db.Create(migration).Error; err != nil {
+	migration, err := s.startMigration(&project, &sourceNode, &targetNode)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	var stopJobID string
-
-	// Step 1: Stop on source (if online)
-	if sourceNode.Online {
-		stopJob := &models.Job{
-			ID:     uuid.New().String(),
-			NodeID: sourceNode.ID,
-			Type:   models.JobTypeMigrateStop,
-			Status: models.JobStatusPending,
-			Payload: &models.JobPayload{
-				ContainerName: project.Name,
-				Operation:     "stop",
-			},
-			MaxRetries: 2,
-			CreatedAt:  time.Now(),
-		}
-		if err := s.db.Create(stopJob).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		stopJobID = stopJob.ID
-		log.Printf("🛑 Stop job created: %s on %s", stopJob.ID, sourceNode.Hostname)
-	}
-
-	// Step 2: Pull image on target
-	token := s.getGitHubToken()
-	if token != "" {
-		pullJob := &models.Job{
-			ID:     uuid.New().String(),
-			NodeID: targetNode.ID,
-			Type:   models.JobTypeImagePull,
-			Status: models.JobStatusPending,
-			Payload: &models.JobPayload{
-				ContainerName: project.Name,
-				Image:         project.Image,
-				Repository:    strings.Split(project.Image, ":")[0],
-				Operation:     "pull",
-			},
-			MaxRetries: 3,
-			CreatedAt:  time.Now(),
-		}
-		if err := s.db.Create(pullJob).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		log.Printf("📥 Pull job created: %s on %s", pullJob.ID, targetNode.Hostname)
-	}
-
-	// Step 3: Start on target
-	startJob := &models.Job{
-		ID:     uuid.New().String(),
-		NodeID: targetNode.ID,
-		Type:   models.JobTypeMigrateStart,
-		Status: models.JobStatusPending,
-		Payload: &models.JobPayload{
-			ContainerName: project.Name,
-			Image:         project.Image,
-			Ports:         project.Ports,
-			Volumes:       project.Volumes,
-			EnvVars:       project.EnvVars,
-			Operation:     "start",
-			SourceNodeIP:  sourceNode.VPNIP,
-		},
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
-	}
-
-	if err := s.db.Create(startJob).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Update project
-	project.NodeID = targetNode.ID
-	s.db.Save(&project)
-
-	migration.JobID = startJob.ID
-	migration.Status = models.MigrationStatusRunning
-	s.db.Save(&migration)
-
-	if err := s.nginxService.UpdateNginxConfig(); err != nil {
-		log.Printf("⚠️ Failed to update Nginx config: %v", err)
-	}
-
-	log.Printf(
-		"🔄 Project migration started: %s (%s) -> %s",
-		project.Name,
-		sourceNode.Hostname,
-		targetNode.Hostname,
-	)
+	log.Printf("🔄 Project migration started: %s (%s) -> %s", project.Name, sourceNode.Hostname, targetNode.Hostname)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"migration":    migration,
-		"stop_job_id":  stopJobID,
-		"start_job_id": startJob.ID,
+		"start_job_id": migration.JobID,
 		"source_node":  sourceNode.Hostname,
 		"target_node":  targetNode.Hostname,
 	})

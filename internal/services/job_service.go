@@ -156,9 +156,13 @@ func (s *JobService) Complete(c *gin.Context) {
 	job.ExitCode = req.ExitCode
 	now := time.Now()
 	job.CompletedAt = &now
+	// The environment can hold secrets and is only needed while the job runs.
+	job.Environment = nil
 	s.db.Save(&job)
 
-	if job.Type == models.JobTypeMigrateStart || job.Type == models.JobTypeFailoverStart {
+	// Failovers and migrations are deploy jobs now; older ones used the
+	// migrate_start/failover_start types. Either way the job ID links them.
+	{
 		var migration models.Migration
 		if err := s.db.Where("job_id = ?", job.ID).First(&migration).Error; err == nil {
 			if job.Status == models.JobStatusCompleted {
@@ -182,7 +186,8 @@ func (s *JobService) Complete(c *gin.Context) {
 
 // completeDeploy records a finished deploy job on its deployment records and
 // project. On success the project is marked running on the job's node, and if
-// it previously ran on another node, the old container there is removed.
+// it previously ran on another node, the old container there is removed (the
+// job waits for that node if it is offline).
 func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 	succeeded := job.Status == models.JobStatusCompleted
 
@@ -209,8 +214,12 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 	s.db.Model(&models.OIDCDeployment{}).Where("job_id = ?", job.ID).Update("status", oidcStatus)
 
 	var project models.Project
-	if err := s.db.Where("repository = ?", dep.Repository).First(&project).Error; err != nil {
-		log.Printf("⚠️ No project for deployment %s (%s): %v", dep.ID, dep.Repository, err)
+	q := s.db.Where("id = ?", dep.ProjectID)
+	if dep.ProjectID == "" {
+		q = s.db.Where("repository = ?", dep.Repository)
+	}
+	if err := q.First(&project).Error; err != nil {
+		log.Printf("⚠️ No project for deployment %s: %v", dep.ID, err)
 		return
 	}
 	// A newer deploy has been dispatched since this one; let that one decide.
@@ -219,27 +228,37 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 	}
 
 	if !succeeded {
-		log.Printf("❌ Deploy of %s failed on node %s (job %s)", project.Name, job.NodeID, job.ID)
-		if project.NodeID == job.NodeID {
-			// The deploy pulls before removing the old container, so a failed
-			// pull leaves the previous version serving. Hand the project back
-			// to the health checker to find out which it is.
-			s.db.Model(&project).Updates(map[string]interface{}{"status": "running", "health_status": "unknown"})
-		} else {
+		log.Printf("❌ Deploy of %s failed on node %s (job %s, %s)", project.Name, job.NodeID, job.ID, dep.Trigger)
+		if project.NodeID == "" {
+			// Never ran anywhere, so nothing is serving.
 			s.db.Model(&project).Updates(map[string]interface{}{"status": "failed", "health_status": "unhealthy"})
+		} else {
+			// The project still points at its previous node. If that copy is
+			// fine (a failed pull leaves it serving) health checks pass; if it
+			// is down, the health checker fails over to a node not tried yet.
+			s.db.Model(&project).Updates(map[string]interface{}{"status": "running", "health_status": "unknown"})
 		}
 		s.routesChanged()
 		return
 	}
 
-	previousNode := project.NodeID
-	s.db.Model(&project).Updates(map[string]interface{}{
+	updates := map[string]interface{}{
 		"status":        "running",
 		"health_status": "unknown",
 		"node_id":       job.NodeID,
 		"image":         dep.ImageName,
 		"last_deployed": now,
-	})
+	}
+	previousNode := project.NodeID
+	s.db.Model(&project).Updates(updates)
+	if project.AutoPort || len(project.Ports) == 0 {
+		if mapping, ok := ParsePortMarker(job.Logs); ok {
+			// A struct update, because Ports' JSON serializer doesn't run
+			// for map updates.
+			s.db.Model(&project).Select("ports", "auto_port").
+				Updates(&models.Project{Ports: []string{mapping}, AutoPort: true})
+		}
+	}
 	log.Printf("✅ Deployed %s (%s) on node %s", project.Name, dep.ImageName, job.NodeID)
 
 	if previousNode != "" && previousNode != job.NodeID {
@@ -270,7 +289,12 @@ func (s *JobService) routesChanged() {
 func redactEnvironment(job *models.Job) {
 	for i, e := range job.Environment {
 		if k, _, ok := strings.Cut(e, "="); ok {
-			job.Environment[i] = k + "=********"
+			job.Environment[i] = k + "=" + models.MaskedValue
+		}
+	}
+	if job.Payload != nil {
+		for i := range job.Payload.EnvVars {
+			job.Payload.EnvVars[i].Value = models.MaskedValue
 		}
 	}
 }
