@@ -208,8 +208,12 @@ export const api = {
     request(`/containers/${id}/restart`, { method: 'POST' }),
 
   // Stats
-  getStats: (): Promise<Stats> =>
-    request<Stats>('/stats'),
+  // Job totals count from the viewer's local midnight.
+  getStats: (): Promise<Stats> => {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    return request<Stats>(`/stats?since=${encodeURIComponent(midnight.toISOString())}`);
+  },
   //settings
   // Settings — add these inside the `api` object, after getStats
 

@@ -281,7 +281,6 @@ func main() {
 		protected.GET("/nodes/:id/terminal", terminalHandlers.Terminal)
 		protected.GET("/stats", func(c *gin.Context) {
 			var nodes []models.Node
-			var jobs []models.Job
 			var projects []models.Project
 
 			database.Find(&nodes)
@@ -292,20 +291,24 @@ func main() {
 				}
 			}
 
-			database.Find(&jobs)
-			success, failed, pending, running := 0, 0, 0, 0
-			for _, j := range jobs {
-				switch j.Status {
-				case models.JobStatusCompleted:
-					success++
-				case models.JobStatusFailed:
-					failed++
-				case models.JobStatusPending:
-					pending++
-				case models.JobStatusRunning:
-					running++
-				}
+			// Totals cover today only: since the viewer's midnight when the
+			// dashboard sends it (?since=RFC3339), else the server's.
+			// Running and pending are live states, so they count every job.
+			y, m, d := time.Now().Date()
+			since := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
+			if t, err := time.Parse(time.RFC3339, c.Query("since")); err == nil {
+				since = t
 			}
+			countJobs := func(q string, args ...interface{}) int {
+				var n int64
+				database.Model(&models.Job{}).Where(q, args...).Count(&n)
+				return int(n)
+			}
+			jobsToday := countJobs("created_at >= ?", since)
+			success := countJobs("created_at >= ? AND status = ?", since, models.JobStatusCompleted)
+			failed := countJobs("created_at >= ? AND status = ?", since, models.JobStatusFailed)
+			pending := countJobs("status = ?", models.JobStatusPending)
+			running := countJobs("status = ?", models.JobStatusRunning)
 
 			database.Find(&projects)
 			healthyProjects, unhealthyProjects := 0, 0
@@ -320,7 +323,7 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{
 				"nodes":             len(nodes),
 				"onlineNodes":       onlineNodes,
-				"jobs":              len(jobs),
+				"jobs":              jobsToday,
 				"success":           success,
 				"failed":            failed,
 				"pending":           pending,

@@ -110,7 +110,7 @@ export default function DashboardPage() {
             sub={`${stats.running} running · ${stats.pending} pending`}
           />
           <StatCard
-            label="Failed jobs"
+            label="Failed today"
             value={`${stats.failed}`}
             sub={stats.failed > 0 ? 'needs attention' : 'all clear'}
             valueClassName={stats.failed > 0 ? 'text-status-red' : undefined}
