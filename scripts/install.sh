@@ -622,9 +622,18 @@ verify() {
     }
     ok "Service is running."
 
+    # The Hub migrates its database before it starts listening, which can
+    # take several seconds, so keep asking for up to a minute.
     info "Running health check..."
-    curl -fsS --max-time 10 "http://127.0.0.1:${HUB_PORT}/health" >/dev/null \
-        || die "Hub is running but /health did not respond."
+    local tries=0
+    until curl -fsS --max-time 5 "http://127.0.0.1:${HUB_PORT}/health" >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if (( tries >= 30 )) || ! systemctl is-active --quiet "$SERVICE_NAME"; then
+            journalctl -u "$SERVICE_NAME" -n 80 --no-pager
+            die "Hub is running but /health did not respond."
+        fi
+        sleep 2
+    done
     ok "Health check passed."
 
     if [[ "$USE_TLS" -eq 1 ]]; then
