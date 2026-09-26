@@ -39,7 +39,8 @@ machine automatically if its own goes down.
 | **Domains and HTTPS** | Set a domain on an app; the Hub routes it and gets and renews a Let's Encrypt certificate. |
 | **Failover in ~30 seconds** | Apps are health-checked every 10 seconds. If a machine or app stops answering, the app is redeployed on the healthiest other machine and traffic follows it. |
 | **Private mesh network** | Machines join over WireGuard. Only the Hub is exposed to the internet — a home PC behind a router works as a node. |
-| **One dashboard** | Nodes, apps, jobs with full logs, health, and a web terminal to each machine. |
+| **Maintenance mode** | Before working on a machine, one click moves its apps to other nodes with no downtime and keeps new ones off it. |
+| **One dashboard** | Nodes with their containers, logs and connection status, apps, jobs with full logs, health, and a web terminal to each machine. |
 | **One-click updates** | The dashboard tells you when a new release is out and installs it for you, verified against the release checksums. |
 
 ## How it works
@@ -82,7 +83,7 @@ is out, or run the same command again; your data and settings are kept. To insta
 a specific version, put it before the project name:
 
 ```bash
-curl -fsSL https://get.asdl.website/v0.6.2/asdl-hub | sudo bash
+curl -fsSL https://get.asdl.website/v0.7.0/asdl-hub | sudo bash
 ```
 
 ## Get started
