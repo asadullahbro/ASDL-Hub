@@ -31,7 +31,7 @@ func NewMigrationService(db *gorm.DB, jobService *JobService, nginxService *Ngin
 }
 
 func (s *MigrationService) StartMigrationSweeper() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	go func() {
 		log.Println("🔄 Migration sweeper started")
 		for range ticker.C {
@@ -40,10 +40,16 @@ func (s *MigrationService) StartMigrationSweeper() {
 	}()
 }
 
+// A migration is stuck if its target hasn't picked the job up within a
+// minute (it is probably down too) or hasn't finished within 5 minutes.
+// Failing it lets the health checker try the next node.
 func (s *MigrationService) cleanupStuckMigrations() {
 	var migrations []models.Migration
 	s.db.Where("status = ?", models.MigrationStatusRunning).
-		Where("created_at < ?", time.Now().Add(-5*time.Minute)).
+		Where("created_at < ? OR (created_at < ? AND job_id IN (?))",
+			time.Now().Add(-5*time.Minute),
+			time.Now().Add(-time.Minute),
+			s.db.Model(&models.Job{}).Select("id").Where("status = ?", models.JobStatusPending)).
 		Find(&migrations)
 
 	for _, migration := range migrations {

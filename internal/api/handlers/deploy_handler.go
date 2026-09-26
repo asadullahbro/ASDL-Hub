@@ -56,6 +56,15 @@ func (h *DeployHandler) Deploy(c *gin.Context) {
 		"workflow", claims.Workflow,
 	)
 
+	// An allowed repo may only deploy its own package, so a compromised or
+	// careless workflow can't run arbitrary images on the nodes.
+	if !imageBelongsToRepo(req.Image, claims.Repository) {
+		slog.Warn("image does not belong to repository", "repository", claims.Repository, "image", req.Image)
+		c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf(
+			"image %q must be ghcr.io/%s (or a path under it)", req.Image, strings.ToLower(claims.Repository))})
+		return
+	}
+
 	environment := claims.Environment
 	if environment == "" {
 		environment = req.Environment
@@ -298,9 +307,7 @@ func (h *DeployHandler) ListGitHubTokens(c *gin.Context) {
 	}
 	// Mask token value
 	for i := range tokens {
-		if len(tokens[i].Token) > 8 {
-			tokens[i].Token = tokens[i].Token[:4] + "..." + tokens[i].Token[len(tokens[i].Token)-4:]
-		}
+		tokens[i].Token = models.EncryptedString(models.MaskToken(string(tokens[i].Token)))
 	}
 	c.JSON(http.StatusOK, tokens)
 }
@@ -319,7 +326,7 @@ func (h *DeployHandler) AddGitHubToken(c *gin.Context) {
 	t := models.GitHubToken{
 		ID:        uuid.New().String(),
 		Label:     input.Label,
-		Token:     input.Token,
+		Token:     models.EncryptedString(input.Token),
 		CreatedAt: time.Now(),
 	}
 	if err := h.db.Create(&t).Error; err != nil {
@@ -327,7 +334,7 @@ func (h *DeployHandler) AddGitHubToken(c *gin.Context) {
 		return
 	}
 	// Return masked
-	t.Token = t.Token[:4] + "..." + t.Token[len(t.Token)-4:]
+	t.Token = models.EncryptedString(models.MaskToken(input.Token))
 	c.JSON(http.StatusCreated, t)
 }
 
@@ -381,6 +388,21 @@ func extractRepoFromToken(rawToken string) string {
 }
 
 // normalizes an image string by removing any SHA256 digest and keeping the last tag, defaulting to "latest" if no tag is found.
+// imageBelongsToRepo reports whether image is repo's GHCR package
+// (ghcr.io/owner/repo) or a package under it (ghcr.io/owner/repo/api),
+// with any tag or digest.
+func imageBelongsToRepo(image, repo string) bool {
+	name := strings.ToLower(image)
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	if colon := strings.LastIndex(name, ":"); colon > strings.LastIndex(name, "/") {
+		name = name[:colon]
+	}
+	want := "ghcr.io/" + strings.ToLower(repo)
+	return repo != "" && (name == want || strings.HasPrefix(name, want+"/"))
+}
+
 func normalizeImage(image string) string {
 	// "ghcr.io/owner/repo:abc1234:latest" → "ghcr.io/owner/repo:abc1234"
 	// "ghcr.io/owner/repo:abc1234"        → "ghcr.io/owner/repo:abc1234"

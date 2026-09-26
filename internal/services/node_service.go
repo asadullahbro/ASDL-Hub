@@ -410,13 +410,14 @@ func (s *NodeService) CheckAllNodesHealth(c *gin.Context) {
 
 func (s *NodeService) StartOfflineSweeper() {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		// Agents send a heartbeat every 30s; three missed ones mean offline.
+		ticker := time.NewTicker(15 * time.Second)
 		for range ticker.C {
 			var nodes []models.Node
 			s.db.Where("online = ?", true).Find(&nodes)
 
 			for _, node := range nodes {
-				if time.Since(node.LastHeartbeat) > 2*time.Minute {
+				if time.Since(node.LastHeartbeat) > 90*time.Second {
 					node.Online = false
 					s.db.Save(&node)
 					log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)

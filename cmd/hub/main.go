@@ -73,6 +73,7 @@ func main() {
 	if err := models.SetSecretsKey(secretsKey); err != nil {
 		log.Fatalf("Set JWT_SECRET or SECRETS_KEY: %v", err)
 	}
+	models.EncryptLegacySecrets(database)
 	authService := services.NewAuthService(database, jwtSecret)
 	authHandlers := handlers.NewAuthHandlers(authService)
 

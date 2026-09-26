@@ -13,6 +13,8 @@ import (
 	"log"
 	"strings"
 	"sync"
+
+	"gorm.io/gorm"
 )
 
 // MaskedValue replaces secret values in API responses. Sending it back in an
@@ -207,4 +209,73 @@ func (s *EncryptedStrings) Scan(value interface{}) error {
 	}
 	*s = stored
 	return nil
+}
+
+// EncryptedString is a string stored encrypted. It marshals to JSON in plain
+// text, so handlers that return it must mask it (see MaskToken).
+type EncryptedString string
+
+func (s EncryptedString) Value() (driver.Value, error) {
+	return encryptSecret(string(s))
+}
+
+func (s *EncryptedString) Scan(value interface{}) error {
+	b, err := scanText(value)
+	if err != nil {
+		return err
+	}
+	plain, err := decryptSecret(string(b))
+	if err != nil {
+		log.Printf("⚠️ stored token: %v", err)
+		plain = ""
+	}
+	*s = EncryptedString(plain)
+	return nil
+}
+
+// MaskToken shows only the ends of a token, e.g. "ghp_...a1b2".
+func MaskToken(token string) string {
+	if len(token) <= 8 {
+		return MaskedValue
+	}
+	return token[:4] + "..." + token[len(token)-4:]
+}
+
+// EncryptLegacySecrets encrypts secrets saved in plain text before
+// encryption existed. Safe to run on every start.
+func EncryptLegacySecrets(db *gorm.DB) {
+	var tokens []GitHubToken
+	db.Where("token NOT LIKE ?", encryptedPrefix+"%").Find(&tokens)
+	for _, t := range tokens {
+		if err := db.Model(&t).Update("token", t.Token).Error; err != nil {
+			log.Printf("⚠️ Failed to encrypt GitHub token %s: %v", t.ID, err)
+		}
+	}
+
+	type rawEnv struct {
+		ID      string
+		EnvVars string
+	}
+	var rows []rawEnv
+	db.Raw("SELECT id, env_vars FROM projects WHERE env_vars IS NOT NULL AND deleted_at IS NULL").Scan(&rows)
+	encrypted := 0
+	for _, r := range rows {
+		var stored []EnvVar
+		if json.Unmarshal([]byte(r.EnvVars), &stored) != nil {
+			continue
+		}
+		for _, e := range stored {
+			if !strings.HasPrefix(e.Value, encryptedPrefix) {
+				var p Project
+				if db.First(&p, "id = ?", r.ID).Error == nil {
+					db.Model(&p).Update("env_vars", p.EnvVars)
+					encrypted++
+				}
+				break
+			}
+		}
+	}
+	if len(tokens)+encrypted > 0 {
+		log.Printf("🔒 Encrypted secrets stored before encryption existed (%d tokens, %d projects)", len(tokens), encrypted)
+	}
 }

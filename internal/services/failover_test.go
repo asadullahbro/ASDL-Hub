@@ -118,3 +118,29 @@ func TestProjectEnv_StoredEncrypted(t *testing.T) {
 		t.Errorf("env_vars column should be encrypted, got %s", raw)
 	}
 }
+
+func TestStuckMigration_UnclaimedJobGivesUpAfterAMinute(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	ms := NewMigrationService(db, nil, nil, NewDeployer(db))
+	old := time.Now().Add(-90 * time.Second)
+	db.Create(&models.Job{ID: "unclaimed", NodeID: "good", Type: models.JobTypeDeploy, Status: models.JobStatusPending, CreatedAt: old})
+	db.Create(&models.Job{ID: "busy", NodeID: "ok", Type: models.JobTypeDeploy, Status: models.JobStatusRunning, CreatedAt: old})
+	db.Create(&models.Migration{ID: "m1", ProjectID: "p1", ContainerID: "c", SourceNodeID: "dead", TargetNodeID: "good",
+		Status: models.MigrationStatusRunning, JobID: "unclaimed", CreatedAt: old})
+	db.Create(&models.Migration{ID: "m2", ProjectID: "p1", ContainerID: "c", SourceNodeID: "dead", TargetNodeID: "ok",
+		Status: models.MigrationStatusRunning, JobID: "busy", CreatedAt: old})
+
+	ms.cleanupStuckMigrations()
+
+	var m1, m2 models.Migration
+	db.First(&m1, "id = ?", "m1")
+	db.First(&m2, "id = ?", "m2")
+	var j models.Job
+	db.First(&j, "id = ?", "unclaimed")
+	if m1.Status != models.MigrationStatusFailed || j.Status != models.JobStatusCancelled {
+		t.Errorf("unclaimed after 90s: migration %q job %q, want failed/cancelled", m1.Status, j.Status)
+	}
+	if m2.Status != models.MigrationStatusRunning {
+		t.Errorf("a job the target is running gets 5 minutes, migration = %q", m2.Status)
+	}
+}

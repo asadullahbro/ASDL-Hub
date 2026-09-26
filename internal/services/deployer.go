@@ -54,7 +54,7 @@ func (d *Deployer) Dispatch(project *models.Project, node *models.Node, image st
 	if strings.HasPrefix(image, "ghcr.io/") {
 		var token models.GitHubToken
 		if d.db.Order("created_at desc").First(&token).Error == nil && token.Token != "" {
-			env = append(env, RegistryTokenEnv+"="+token.Token)
+			env = append(env, RegistryTokenEnv+"="+string(token.Token))
 			spec.RegistryLogin = true
 		}
 	}

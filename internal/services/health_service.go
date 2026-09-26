@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +16,12 @@ import (
 
 // failoverThreshold is how many health checks in a row must fail before a
 // project is failed over, so one slow response or a restart doesn't move it.
-const failoverThreshold = 3
+// With healthCheckInterval that is about 30 seconds of downtime.
+const (
+	failoverThreshold   = 3
+	healthCheckInterval = 10 * time.Second
+	healthCheckTimeout  = 3 * time.Second
+)
 
 type HealthService struct {
 	db               *gorm.DB
@@ -38,7 +44,7 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 }
 
 func (s *HealthService) StartHealthChecker() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(healthCheckInterval)
 	go func() {
 		log.Println("🩺 Health checker started")
 		for range ticker.C {
@@ -51,8 +57,21 @@ func (s *HealthService) checkAllProjects() {
 	var projects []models.Project
 	s.db.Where("status = ?", "running").Find(&projects)
 
-	for _, project := range projects {
-		if s.checkProjectHealth(&project) {
+	// Check all projects at once so one dead node (every check timing out)
+	// doesn't delay the rest; act on the results one by one.
+	healthy := make([]bool, len(projects))
+	var wg sync.WaitGroup
+	for i := range projects {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			healthy[i] = s.checkProjectHealth(&projects[i])
+		}(i)
+	}
+	wg.Wait()
+
+	for i, project := range projects {
+		if healthy[i] {
 			delete(s.failures, project.ID)
 			if project.HealthStatus != "healthy" {
 				s.db.Model(&project).Update("health_status", "healthy")
@@ -85,7 +104,7 @@ func (s *HealthService) checkProjectHealth(project *models.Project) bool {
 		return false
 	}
 
-	client := http.Client{Timeout: 5 * time.Second}
+	client := http.Client{Timeout: healthCheckTimeout}
 	url := fmt.Sprintf("http://%s:%s/health", node.VPNIP, project.HostPort())
 
 	resp, err := client.Get(url)

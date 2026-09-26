@@ -12,10 +12,10 @@ type AllowedRepo struct {
 }
 
 type GitHubToken struct {
-	ID        string    `gorm:"primaryKey" json:"id"`
-	Label     string    `gorm:"size:255" json:"label"`
-	Token     string    `gorm:"size:255" json:"token"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string          `gorm:"primaryKey" json:"id"`
+	Label     string          `gorm:"size:255" json:"label"`
+	Token     EncryptedString `gorm:"type:text" json:"token"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 type OIDCDeployment struct {
