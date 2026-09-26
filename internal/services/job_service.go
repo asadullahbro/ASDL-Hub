@@ -85,8 +85,6 @@ func (s *JobService) Claim(c *gin.Context) {
 		vpnIP = c.ClientIP()
 	}
 
-	log.Printf("Claiming job for node: %s, VPN IP: %v", nodeID, vpnIP)
-
 	var node models.Node
 	err := s.db.Where("id = ? OR vpn_ip = ?", nodeID, vpnIP).First(&node).Error
 	if err != nil {
@@ -94,8 +92,6 @@ func (s *JobService) Claim(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
-
-	log.Printf("Found node: %s (ID: %s)", node.Hostname, node.ID)
 
 	var job models.Job
 	err = s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).

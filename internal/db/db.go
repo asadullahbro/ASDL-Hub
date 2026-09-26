@@ -3,6 +3,7 @@ package db
 import (
 	"log"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -13,8 +14,20 @@ import (
 )
 
 func Init(dsn string) (*gorm.DB, error) {
+	// Logging every statement floods the journal (nodes poll every few
+	// seconds) and would print stored values, so only warnings and errors are
+	// logged unless LOG_LEVEL=debug.
+	level := logger.Warn
+	if os.Getenv("LOG_LEVEL") == "debug" {
+		level = logger.Info
+	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.New(log.New(os.Stdout, "", log.LstdFlags), logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  level,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		}),
 	})
 	if err != nil {
 		return nil, err

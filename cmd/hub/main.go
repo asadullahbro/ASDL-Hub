@@ -114,6 +114,10 @@ func main() {
 	healthService := services.NewHealthService(database, migrationService, nginxService, deployer)
 	healthService.StartHealthChecker()
 
+	// Routes live in files nginx reads, so bring them in line with the
+	// database at startup (e.g. after an upgrade or a manual nginx change).
+	go updateRoutes()
+
 	// Settings service and handler
 	settingsService := services.NewSettingsService(database, authService, jwtSecret)
 	settingsHandlers := handlers.NewSettingsHandlers(settingsService)
@@ -137,7 +141,15 @@ func main() {
 		}
 	}()
 
-	router := gin.Default()
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	router := gin.New()
+	// Nodes poll these every few seconds; logging them would bury
+	// everything else.
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
+		SkipPaths: []string{"/api/v1/jobs/claim", "/health"},
+	}), gin.Recovery())
 
 	// CORS middleware — reflect only allow-listed origins. "*" combined with
 	// credentials is rejected by browsers anyway and defeats the point of CORS.

@@ -557,6 +557,9 @@ EOF
 
 setup_service() {
     info "Configuring systemd service..."
+    # No CapabilityBoundingSet: it also caps what the hub runs via sudo
+    # (nginx -t, reloading nginx, issuing certificates), so sudo could not
+    # become root at all. Sudo access is limited by /etc/sudoers.d instead.
     cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=ASDL Hub
@@ -577,7 +580,6 @@ PrivateTmp=true
 ProtectSystem=false
 ProtectHome=true
 AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target
