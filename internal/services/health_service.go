@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +13,17 @@ import (
 	"github.com/asdl/hub/internal/models"
 )
 
+// failoverThreshold is how many health checks in a row must fail before a
+// project is failed over, so one slow response or a restart doesn't move it.
+const failoverThreshold = 3
+
 type HealthService struct {
 	db               *gorm.DB
 	migrationService *MigrationService
 	nginxService     *NginxService
+	// failures counts consecutive failed checks per project ID. Only the
+	// checker goroutine touches it.
+	failures map[string]int
 }
 
 func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService) *HealthService {
@@ -25,6 +31,7 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 		db:               db,
 		migrationService: migrationService,
 		nginxService:     nginxService,
+		failures:         make(map[string]int),
 	}
 }
 
@@ -43,12 +50,24 @@ func (s *HealthService) checkAllProjects() {
 	s.db.Where("status = ?", "running").Find(&projects)
 
 	for _, project := range projects {
-		healthy := s.checkProjectHealth(&project)
-
-		if !healthy {
-			log.Printf("⚠️ Project %s is unhealthy, attempting failover...", project.Name)
-			s.handleUnhealthyProject(&project)
+		if s.checkProjectHealth(&project) {
+			delete(s.failures, project.ID)
+			if project.HealthStatus != "healthy" {
+				s.db.Model(&project).Update("health_status", "healthy")
+			}
+			continue
 		}
+
+		s.failures[project.ID]++
+		if s.failures[project.ID] < failoverThreshold {
+			s.db.Model(&project).Update("health_status", "degraded")
+			log.Printf("⚠️ Project %s failed health check %d/%d", project.Name, s.failures[project.ID], failoverThreshold)
+			continue
+		}
+
+		delete(s.failures, project.ID)
+		log.Printf("⚠️ Project %s is unhealthy, attempting failover...", project.Name)
+		s.handleUnhealthyProject(&project)
 	}
 }
 
@@ -64,16 +83,8 @@ func (s *HealthService) checkProjectHealth(project *models.Project) bool {
 		return false
 	}
 
-	port := "8000"
-	if len(project.Ports) > 0 {
-		parts := strings.Split(project.Ports[0], ":")
-		if len(parts) == 2 {
-			port = parts[0]
-		}
-	}
-
 	client := http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("http://%s:%s/health", node.VPNIP, port)
+	url := fmt.Sprintf("http://%s:%s/health", node.VPNIP, project.HostPort())
 
 	resp, err := client.Get(url)
 	if err != nil {
@@ -82,8 +93,9 @@ func (s *HealthService) checkProjectHealth(project *models.Project) bool {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		log.Printf("✅ Project %s is healthy on %s", project.Name, node.Hostname)
+	// Any non-5xx answer means the app is up and serving. Apps without a
+	// /health route answer 404, which shouldn't trigger a failover.
+	if resp.StatusCode < 500 {
 		return true
 	}
 

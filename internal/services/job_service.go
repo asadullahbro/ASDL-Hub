@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,15 @@ import (
 
 type JobService struct {
 	db *gorm.DB
+	// onRoutesChanged is called after a deploy changes which node serves a
+	// project, so nginx can be regenerated. Optional.
+	onRoutesChanged func()
+}
+
+// SetRoutesChangedHook registers fn to run (in the background) whenever a
+// finished deploy changes a project's status or node.
+func (s *JobService) SetRoutesChangedHook(fn func()) {
+	s.onRoutesChanged = fn
 }
 
 func NewJobService(db *gorm.DB) *JobService {
@@ -163,7 +173,106 @@ func (s *JobService) Complete(c *gin.Context) {
 		}
 	}
 
+	if job.Type == models.JobTypeDeploy {
+		s.completeDeploy(&job, now)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// completeDeploy records a finished deploy job on its deployment records and
+// project. On success the project is marked running on the job's node, and if
+// it previously ran on another node, the old container there is removed.
+func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
+	succeeded := job.Status == models.JobStatusCompleted
+
+	var dep models.Deployment
+	if err := s.db.Where("job_id = ?", job.ID).First(&dep).Error; err != nil {
+		log.Printf("⚠️ No deployment record for deploy job %s: %v", job.ID, err)
+		return
+	}
+	depStatus := models.DeploymentStatusCompleted
+	if !succeeded {
+		depStatus = models.DeploymentStatusFailed
+	}
+	s.db.Model(&dep).Updates(map[string]interface{}{
+		"status":       depStatus,
+		"logs":         job.Logs,
+		"started_at":   job.StartedAt,
+		"completed_at": now,
+	})
+
+	oidcStatus := "succeeded"
+	if !succeeded {
+		oidcStatus = "failed"
+	}
+	s.db.Model(&models.OIDCDeployment{}).Where("job_id = ?", job.ID).Update("status", oidcStatus)
+
+	var project models.Project
+	if err := s.db.Where("repository = ?", dep.Repository).First(&project).Error; err != nil {
+		log.Printf("⚠️ No project for deployment %s (%s): %v", dep.ID, dep.Repository, err)
+		return
+	}
+	// A newer deploy has been dispatched since this one; let that one decide.
+	if project.DeploymentID != "" && project.DeploymentID != dep.ID {
+		return
+	}
+
+	if !succeeded {
+		log.Printf("❌ Deploy of %s failed on node %s (job %s)", project.Name, job.NodeID, job.ID)
+		if project.NodeID == job.NodeID {
+			// The deploy pulls before removing the old container, so a failed
+			// pull leaves the previous version serving. Hand the project back
+			// to the health checker to find out which it is.
+			s.db.Model(&project).Updates(map[string]interface{}{"status": "running", "health_status": "unknown"})
+		} else {
+			s.db.Model(&project).Updates(map[string]interface{}{"status": "failed", "health_status": "unhealthy"})
+		}
+		s.routesChanged()
+		return
+	}
+
+	previousNode := project.NodeID
+	s.db.Model(&project).Updates(map[string]interface{}{
+		"status":        "running",
+		"health_status": "unknown",
+		"node_id":       job.NodeID,
+		"image":         dep.ImageName,
+		"last_deployed": now,
+	})
+	log.Printf("✅ Deployed %s (%s) on node %s", project.Name, dep.ImageName, job.NodeID)
+
+	if previousNode != "" && previousNode != job.NodeID {
+		stop := &models.Job{
+			ID:         uuid.New().String(),
+			NodeID:     previousNode,
+			Type:       models.JobTypeFailoverStop,
+			Status:     models.JobStatusPending,
+			Command:    BuildStopCommand(project.Name),
+			MaxRetries: 2,
+			CreatedAt:  now,
+		}
+		if err := s.db.Create(stop).Error; err != nil {
+			log.Printf("⚠️ Failed to queue removal of old %s container on node %s: %v", project.Name, previousNode, err)
+		}
+	}
+	s.routesChanged()
+}
+
+func (s *JobService) routesChanged() {
+	if s.onRoutesChanged != nil {
+		go s.onRoutesChanged()
+	}
+}
+
+// redactEnvironment hides env var values, which can hold registry tokens,
+// from job API responses. Only the claiming node gets them in full.
+func redactEnvironment(job *models.Job) {
+	for i, e := range job.Environment {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			job.Environment[i] = k + "=********"
+		}
+	}
 }
 
 func (s *JobService) List(c *gin.Context) {
@@ -190,6 +299,9 @@ func (s *JobService) List(c *gin.Context) {
 
 	s.db.Model(&models.Job{}).Count(&total)
 	s.db.Order("created_at DESC").Limit(limitInt).Offset(offset).Find(&jobs)
+	for i := range jobs {
+		redactEnvironment(&jobs[i])
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": jobs,
@@ -209,6 +321,7 @@ func (s *JobService) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 		return
 	}
+	redactEnvironment(&job)
 	c.JSON(http.StatusOK, job)
 }
 
@@ -254,5 +367,6 @@ func (s *JobService) Retry(c *gin.Context) {
 		return
 	}
 
+	redactEnvironment(newJob)
 	c.JSON(http.StatusCreated, newJob)
 }
