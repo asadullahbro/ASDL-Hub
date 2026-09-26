@@ -199,8 +199,23 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	if req.Domain != "" {
 		project.Domain = req.Domain
 	}
-	if req.NodeID != "" {
-		project.NodeID = req.NodeID
+	// Picking another node moves the app there: the project keeps pointing
+	// at its current node until the new container runs (JobService.Complete).
+	var moveTo *models.Node
+	if req.NodeID != "" && req.NodeID != project.NodeID {
+		var node models.Node
+		if err := s.db.First(&node, "id = ?", req.NodeID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+		if project.NodeID == "" || project.Image == "" {
+			project.NodeID = node.ID // nothing running yet, so nothing to move
+		} else if !node.Online {
+			c.JSON(http.StatusConflict, gin.H{"error": "node " + node.Hostname + " is offline"})
+			return
+		} else {
+			moveTo = &node
+		}
 	}
 	if req.Image != "" {
 		project.Image = req.Image
@@ -227,8 +242,15 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 
 	s.db.Save(&project)
 	s.routesChanged()
-	// Containers only read their config at start, so apply it now.
-	if !reflect.DeepEqual(before, containerConfig(&project)) {
+	if moveTo != nil {
+		if _, _, err := s.deployer.Dispatch(&project, moveTo, project.Image, DeployMeta{
+			Trigger:    TriggerMigration,
+			Repository: project.Repository,
+		}); err != nil {
+			log.Printf("⚠️ Could not move %s to %s: %v", project.Name, moveTo.Hostname, err)
+		}
+	} else if !reflect.DeepEqual(before, containerConfig(&project)) {
+		// Containers only read their config at start, so apply it now.
 		if _, err := s.redeploy(&project); err != nil {
 			log.Printf("⚠️ Config of %s changed but it could not be redeployed yet: %v", project.Name, err)
 		}

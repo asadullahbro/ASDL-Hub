@@ -126,6 +126,9 @@ export interface Project {
   health_status: string;
   image: string;
   ports: string[];
+  auto_port?: boolean;
+  // Values come back masked; sending a masked value back keeps it.
+  env_vars?: { key: string; value: string }[] | null;
   uptime: number;
   last_deployed: string;
   created_at: string;

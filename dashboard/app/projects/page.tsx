@@ -5,6 +5,28 @@ import { api } from '../../lib/api';
 import { Project, Node } from '../../types';
 import { Pagination } from '@/components/ui/Pagination';
 
+// Parses .env text into env vars: KEY=value lines, ignoring blanks and
+// comments, allowing "export " and quoted values.
+function parseEnv(text: string): { key: string; value: string }[] {
+  const vars: { key: string; value: string }[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim().replace(/^export\s+/, '');
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    let value = line.slice(eq + 1).trim();
+    if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value[value.length - 1] === value[0]) {
+      value = value.slice(1, -1);
+    }
+    vars.push({ key: line.slice(0, eq).trim(), value });
+  }
+  return vars;
+}
+
+function envText(project: Project): string {
+  return (project.env_vars || []).map(e => `${e.key}=${e.value}`).join('\n');
+}
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -26,6 +48,7 @@ export default function ProjectsPage() {
     node_id: '',
     image: '',
     ports: '',
+    env: '',
     status: '',
   });
   const [saving, setSaving] = useState(false);
@@ -104,7 +127,8 @@ export default function ProjectsPage() {
       domain: project.domain || '',
       node_id: project.node_id,
       image: project.image || '',
-      ports: project.ports?.join(', ') || '',
+      ports: project.auto_port ? '' : project.ports?.join(', ') || '',
+      env: envText(project),
       status: project.status,
     });
   };
@@ -113,21 +137,38 @@ export default function ProjectsPage() {
     if (!editingProject) return;
     setSaving(true);
     try {
-      await api.updateProject(editingProject.id, {
+      const update: Partial<Project> = {
         name: editForm.name,
         description: editForm.description,
         domain: editForm.domain,
         node_id: editForm.node_id,
         image: editForm.image,
-        ports: editForm.ports ? editForm.ports.split(',').map(p => p.trim()) : [],
         status: editForm.status,
-      });
+      };
+      // Only send ports and env when edited: changing them redeploys the app.
+      const originalPorts = editingProject.auto_port ? '' : editingProject.ports?.join(', ') || '';
+      if (editForm.ports !== originalPorts) {
+        update.ports = editForm.ports ? editForm.ports.split(',').map(p => p.trim()).filter(Boolean) : [];
+      }
+      if (editForm.env !== envText(editingProject)) {
+        update.env_vars = parseEnv(editForm.env);
+      }
+      await api.updateProject(editingProject.id, update);
       setEditingProject(null);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update project');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRedeploy = async (project: Project) => {
+    try {
+      await api.redeployProject(project.id);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to redeploy project');
     }
   };
 
@@ -255,6 +296,12 @@ export default function ProjectsPage() {
                     Edit
                   </button>
                   <button
+                    onClick={() => handleRedeploy(project)}
+                    className="text-xs text-accent hover:text-accent-hover transition-colors"
+                  >
+                    Redeploy
+                  </button>
+                  <button
                     onClick={() => setDeletingProject(project)}
                     className="text-xs text-status-red hover:opacity-80 transition-opacity"
                   >
@@ -294,7 +341,7 @@ export default function ProjectsPage() {
                 { label: 'Description', key: 'description' },
                 { label: 'Domain', key: 'domain' },
                 { label: 'Image', key: 'image' },
-                { label: 'Ports (host:container, comma separated, e.g. 8080:8000)', key: 'ports' },
+                { label: 'Ports (leave empty to let the hub pick; or host:container, e.g. 8080:8000)', key: 'ports' },
               ].map(({ label, key }) => (
                 <div key={key}>
                   <label className="block text-xs text-text-muted mb-1">{label}</label>
@@ -306,6 +353,22 @@ export default function ProjectsPage() {
                   />
                 </div>
               ))}
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  Environment variables (.env format)
+                </label>
+                <textarea
+                  rows={6}
+                  value={editForm.env}
+                  onChange={e => setEditForm(f => ({ ...f, env: e.target.value }))}
+                  placeholder={'DATABASE_URL=postgres://...\nSECRET_KEY=...'}
+                  spellCheck={false}
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm font-mono text-text-primary focus:outline-none focus:border-accent"
+                />
+                <p className="text-xs text-text-muted mt-1">
+                  Stored encrypted and shown masked. Leave ******** to keep a value; changes redeploy the app.
+                </p>
+              </div>
               <div>
                 <label className="block text-xs text-text-muted mb-1">Node</label>
                 <select

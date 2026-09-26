@@ -346,8 +346,9 @@ generate_secrets() {
     mkdir -p "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR"
 
-    local old_jwt old_admin
+    local old_jwt old_admin old_secrets
     old_jwt="$(awk -F= '$1=="JWT_SECRET"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+    old_secrets="$(awk -F= '$1=="SECRETS_KEY"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
     old_admin="$(awk -F= '$1=="ADMIN_PASSWORD"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
 
     if [[ -s "$INSTALL_DIR/.db_password" ]]; then
@@ -359,6 +360,10 @@ generate_secrets() {
     fi
 
     JWT_SECRET="${old_jwt:-$(openssl rand -hex 48)}"
+    # Project secrets are encrypted with this. Hubs that predate it derive
+    # the key from JWT_SECRET, so start from that value to keep existing
+    # secrets readable; from then on it is kept even if JWT_SECRET changes.
+    SECRETS_KEY="${old_secrets:-$JWT_SECRET}"
     ADMIN_PASSWORD="${old_admin:-$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 24)}"
 
     ok "Secrets ready."
@@ -496,6 +501,7 @@ DB_NAME=asdl_hub
 DB_SSLMODE=disable
 
 JWT_SECRET=$JWT_SECRET
+SECRETS_KEY=$SECRETS_KEY
 ADMIN_PASSWORD=$ADMIN_PASSWORD
 
 SERVER_PORT=$HUB_PORT

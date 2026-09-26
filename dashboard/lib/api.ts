@@ -167,6 +167,9 @@ export const api = {
   deleteProject: (id: string): Promise<void> =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
 
+  redeployProject: (id: string): Promise<{ job_id: string; node_id: string }> =>
+    request<{ job_id: string; node_id: string }>(`/projects/${id}/redeploy`, { method: 'POST' }),
+
   // Migrations
   getMigrations: (page?: number, limit?: number): Promise<PaginatedResponse<Migration>> => {
     const params = new URLSearchParams();
