@@ -40,7 +40,9 @@ Connect your nodes, manage services and deployments, monitor health, run jobs, a
 ```
 
 The Hub manages the infrastructure while the Agent runs on managed nodes.
-Installation
+
+## Installation
+
 ASDL Hub is designed to be installed with a single command:
 ```bash
 curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
@@ -56,12 +58,6 @@ curl -fsSL https://get.asdl.website/v0.4.3/asdl-hub | sudo bash
 ## Documentation
 Full documentation:
 https://docs.asdl.website/asdl-hub
-
-## Installation
-```bash
-curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
-```
-Pin a version: `curl -fsSL https://get.asdl.website/v0.4.3/asdl-hub | sudo bash`
 
 ## Status
 ASDL Hub is currently under active development.
