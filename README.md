@@ -57,7 +57,7 @@ curl -fsSL https://get.asdl.website/v0.4.3/asdl-hub | sudo bash
 
 ## Documentation
 Full documentation:
-https://docs.asdl.website/asdl-hub
+https://docs.asdl.website/hub/overview/
 
 ## Status
 ASDL Hub is currently under active development.
