@@ -43,7 +43,8 @@ type MaintenanceResult struct {
 // with nowhere to go stay where they are. Turning it off moves nothing back.
 func (s *NodeOpsService) SetMaintenance(node *models.Node, on bool, by string) (*MaintenanceResult, error) {
 	res := &MaintenanceResult{Moving: []string{}, Stays: []string{}}
-	if node.Maintenance != on {
+	if changed := node.Maintenance != on; changed {
+		defer func() { notifyMaintenance(node.Hostname, on, by, res) }()
 		updates := map[string]interface{}{"maintenance": on, "maintenance_by": by, "maintenance_since": nil}
 		if on {
 			now := time.Now()
@@ -84,6 +85,28 @@ func (s *NodeOpsService) SetMaintenance(node *models.Node, on bool, by string) (
 		res.Moving = append(res.Moving, p.Name+" → "+target.Hostname)
 	}
 	return res, nil
+}
+
+func notifyMaintenance(node string, on bool, by string, res *MaintenanceResult) {
+	ev := Event{Type: EventNodeMaintenance, Level: LevelInfo, URL: link("/nodes"), Node: node}
+	if !on {
+		ev.Title = node + " is out of maintenance"
+		ev.Message = node + " takes apps again."
+	} else {
+		ev.Title = node + " is in maintenance"
+		ev.Message = node + " takes no new apps until maintenance is turned off."
+		if len(res.Moving) > 0 {
+			ev.Fields = append(ev.Fields, EventField{Name: "Moving", Value: strings.Join(res.Moving, "\n")})
+		}
+		if len(res.Stays) > 0 {
+			ev.Level = LevelWarning
+			ev.Fields = append(ev.Fields, EventField{Name: "Stays (nowhere to go)", Value: strings.Join(res.Stays, ", ")})
+		}
+	}
+	if by != "" {
+		ev.Fields = append(ev.Fields, EventField{Name: "By", Value: by})
+	}
+	notify(ev)
 }
 
 // SetMaintenanceHandler handles PUT /nodes/:id/maintenance {"enabled": bool}

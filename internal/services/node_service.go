@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -68,6 +69,9 @@ func (s *NodeService) Register(c *gin.Context) {
 		node.MemoryTotal = req.MemoryTotal
 		node.DiskTotal = req.DiskTotal
 		node.Capabilities = req.Capabilities
+		if !node.Online {
+			notifyNodeOnline(&node)
+		}
 		node.Online = true
 		node.LastHeartbeat = time.Now()
 
@@ -125,6 +129,9 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 		return
 	}
 
+	if !node.Online {
+		notifyNodeOnline(&node)
+	}
 	node.Online = true
 	node.LastHeartbeat = time.Now()
 	node.Uptime = req.Uptime
@@ -421,6 +428,18 @@ func (s *NodeService) CheckAllNodesHealth(c *gin.Context) {
 	})
 }
 
+func notifyNodeOnline(node *models.Node) {
+	msg := node.Hostname + " is sending heartbeats again."
+	if !node.LastHeartbeat.IsZero() {
+		msg = fmt.Sprintf("%s is sending heartbeats again, after %s offline.", node.Hostname, time.Since(node.LastHeartbeat).Round(time.Second))
+	}
+	notify(Event{
+		Type: EventNodeOnline, Level: LevelSuccess,
+		Title: node.Hostname + " is back online", Message: msg,
+		URL: link("/nodes"), Node: node.Hostname,
+	})
+}
+
 func (s *NodeService) StartOfflineSweeper() {
 	go func() {
 		// Agents send a heartbeat every 30s; three missed ones mean offline.
@@ -434,6 +453,13 @@ func (s *NodeService) StartOfflineSweeper() {
 					node.Online = false
 					s.db.Save(&node)
 					log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)
+					notify(Event{
+						Type: EventNodeOffline, Level: LevelError,
+						Title:   node.Hostname + " is offline",
+						Message: fmt.Sprintf("No heartbeat from %s for %s. Its apps move to other nodes if they stop answering.", node.Hostname, time.Since(node.LastHeartbeat).Round(time.Second)),
+						Fields:  []EventField{{Name: "Address", Value: node.VPNIP}},
+						URL:     link("/nodes"), Node: node.Hostname,
+					})
 				}
 			}
 		}

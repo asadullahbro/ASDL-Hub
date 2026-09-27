@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -225,6 +226,22 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 
 	if !succeeded {
 		log.Printf("❌ Deploy of %s failed on node %s (job %s, %s)", project.Name, job.NodeID, job.ID, dep.Trigger)
+		msg := fmt.Sprintf("Deploying %s on %s failed.", project.Name, s.nodeName(job.NodeID))
+		switch project.NodeID {
+		case "":
+		case job.NodeID:
+			msg += " The copy already running there was left as it was."
+		default:
+			msg += fmt.Sprintf(" The copy on %s keeps running.", s.nodeName(project.NodeID))
+		}
+		notify(Event{
+			Type: EventDeployFailed, Level: LevelError,
+			Title: project.Name + " failed to deploy", Message: msg,
+			Fields:    deployFields(&dep, s.nodeName(job.NodeID)),
+			Details:   lastLines(job.Logs, 8),
+			URL:       link("/jobs?id=" + job.ID),
+			ProjectID: project.ID, Project: project.Name, Node: s.nodeName(job.NodeID),
+		})
 		if project.NodeID == "" {
 			// Never ran anywhere, so nothing is serving.
 			s.db.Model(&project).Updates(map[string]interface{}{"status": "failed", "health_status": "unhealthy"})
@@ -260,6 +277,21 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 			Update("host_port", port)
 	}
 	log.Printf("✅ Deployed %s (%s) on node %s", project.Name, dep.ImageName, job.NodeID)
+	// A failover is announced by the health checker (down, then back up).
+	if dep.Trigger != TriggerFailover {
+		node := s.nodeName(job.NodeID)
+		msg := fmt.Sprintf("%s is running on %s.", project.Name, node)
+		if previousNode != "" && previousNode != job.NodeID {
+			msg = fmt.Sprintf("%s moved from %s to %s.", project.Name, s.nodeName(previousNode), node)
+		}
+		notify(Event{
+			Type: EventDeploySucceeded, Level: LevelSuccess,
+			Title: project.Name + " deployed", Message: msg,
+			Fields:    deployFields(&dep, node),
+			URL:       link("/projects"),
+			ProjectID: project.ID, Project: project.Name, Node: node,
+		})
+	}
 
 	if previousNode != "" && previousNode != job.NodeID {
 		stop := &models.Job{
@@ -276,6 +308,82 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 		}
 	}
 	s.routesChanged()
+}
+
+func (s *JobService) nodeName(id string) string {
+	var node models.Node
+	if s.db.Select("hostname").First(&node, "id = ?", id).Error != nil {
+		return "an unknown node"
+	}
+	return node.Hostname
+}
+
+func deployFields(dep *models.Deployment, node string) []EventField {
+	f := []EventField{{Name: "Node", Value: node}}
+	if dep.ImageName != "" {
+		f = append(f, EventField{Name: "Image", Value: dep.ImageName})
+	}
+	if dep.Trigger != "" {
+		f = append(f, EventField{Name: "Started by", Value: triggerLabel(dep.Trigger)})
+	}
+	if dep.Commit != "" {
+		c := shortSHA(dep.Commit)
+		if dep.CommitMsg != "" {
+			c += " " + truncate(strings.SplitN(dep.CommitMsg, "\n", 2)[0], 80)
+		}
+		f = append(f, EventField{Name: "Commit", Value: c})
+	}
+	return f
+}
+
+func triggerLabel(t string) string {
+	switch t {
+	case TriggerCI:
+		return "a push (GitHub Actions)"
+	case TriggerFailover:
+		return "failover"
+	case TriggerMigration:
+		return "a move"
+	case TriggerManual:
+		return "the dashboard or API"
+	}
+	return t
+}
+
+func shortSHA(s string) string {
+	if len(s) > 7 {
+		return s[:7]
+	}
+	return s
+}
+
+// lastLines returns the last n lines of a job's logs that say something,
+// skipping the summary the agent adds (exit code, duration, ...).
+func lastLines(logs string, n int) string {
+	var out []string
+	lines := strings.Split(strings.TrimSpace(logs), "\n")
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		l := strings.TrimSpace(lines[i])
+		if isAgentSummaryLine(l) {
+			continue
+		}
+		if l != "" {
+			out = append([]string{truncate(l, 200)}, out...)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func isAgentSummaryLine(l string) bool {
+	if strings.Trim(l, "=") == "" {
+		return true
+	}
+	for _, p := range []string{"Completed at:", "Exit Code:", "Duration:", "STDOUT:", "STDERR:"} {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *JobService) routesChanged() {

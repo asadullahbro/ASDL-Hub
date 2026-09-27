@@ -121,6 +121,10 @@ func main() {
 	healthService := services.NewHealthService(database, migrationService, nginxService, deployer)
 	healthService.StartHealthChecker()
 
+	// Notifications — sends events (deploys, failovers, nodes going down)
+	// to Discord, Slack, Telegram, ntfy, email or webhooks
+	notificationService := services.NewNotificationService(database, cfg.Server.HubURL)
+
 	updateService := services.NewUpdateService(Version)
 	updateService.Start()
 	log.Printf("ASDL Hub %s", Version)
@@ -549,6 +553,18 @@ echo "Agent updated successfully"
 		protected.POST("/projects/:id/plugins", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Attach)
 		protected.DELETE("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Detach)
 		protected.PUT("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Update)
+		notifications := protected.Group("/notifications")
+		notifications.Use(middleware.RequireRole(models.RoleAdmin))
+		{
+			notifications.GET("/types", notificationService.Types)
+			notifications.POST("/types", notificationService.AddType)
+			notifications.DELETE("/types/:id", notificationService.RemoveType)
+			notifications.GET("", notificationService.List)
+			notifications.POST("", notificationService.Create)
+			notifications.PUT("/:id", notificationService.Update)
+			notifications.DELETE("/:id", notificationService.Delete)
+			notifications.POST("/:id/test", notificationService.Test)
+		}
 		// Everyone signed in sees whether an update exists; admins install it.
 		protected.GET("/system/version", updateService.Status)
 		protected.POST("/system/update", middleware.RequireRole(models.RoleAdmin), updateService.Update)

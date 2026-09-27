@@ -31,6 +31,12 @@ type HealthService struct {
 	// failures counts consecutive failed checks per project ID. Only the
 	// checker goroutine touches it.
 	failures map[string]int
+	// down holds when each project was announced down, so "back up" is
+	// announced once it answers again. Only the checker goroutine touches it.
+	down map[string]time.Time
+	// failingSince holds when each project's current run of failed checks
+	// began. Only the checker goroutine touches it.
+	failingSince map[string]time.Time
 }
 
 func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService, deployer *Deployer) *HealthService {
@@ -40,6 +46,8 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 		nginxService:     nginxService,
 		deployer:         deployer,
 		failures:         make(map[string]int),
+		down:             make(map[string]time.Time),
+		failingSince:     make(map[string]time.Time),
 	}
 }
 
@@ -73,13 +81,27 @@ func (s *HealthService) checkAllProjects() {
 	for i, project := range projects {
 		if healthy[i] {
 			delete(s.failures, project.ID)
+			delete(s.failingSince, project.ID)
 			if project.HealthStatus != "healthy" {
 				s.db.Model(&project).Update("health_status", "healthy")
+			}
+			if since, ok := s.down[project.ID]; ok {
+				delete(s.down, project.ID)
+				node := s.nodeName(project.NodeID)
+				notify(Event{
+					Type: EventAppRecovered, Level: LevelSuccess,
+					Title:   project.Name + " is back up",
+					Message: fmt.Sprintf("%s answers again on %s, after %s down.", project.Name, node, time.Since(since).Round(time.Second)),
+					URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
+				})
 			}
 			continue
 		}
 
 		s.failures[project.ID]++
+		if _, ok := s.failingSince[project.ID]; !ok {
+			s.failingSince[project.ID] = time.Now()
+		}
 		if s.failures[project.ID] < failoverThreshold {
 			s.db.Model(&project).Update("health_status", "degraded")
 			log.Printf("⚠️ Project %s failed health check %d/%d", project.Name, s.failures[project.ID], failoverThreshold)
@@ -145,6 +167,7 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 	image := project.Image
 	if image == "" {
 		log.Printf("❌ %s has no image to fail over with", project.Name)
+		s.announceDown(project, "and it has no image to start elsewhere.")
 		s.markFailed(project)
 		return
 	}
@@ -152,9 +175,11 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 	target := s.failoverTarget(project)
 	if target == nil {
 		log.Printf("❌ No node left to run %s; marking it failed", project.Name)
+		s.announceDown(project, "and no other node can take it over, so it stays down until one can or it recovers.")
 		s.markFailed(project)
 		return
 	}
+	s.announceDown(project, fmt.Sprintf("so it is being moved to %s.", target.Hostname))
 
 	log.Printf("🔄 Failing over %s: %s -> %s", project.Name, project.NodeID, target.Hostname)
 	job, _, err := s.deployer.Dispatch(project, target, image, DeployMeta{
@@ -211,6 +236,34 @@ func (s *HealthService) failoverTarget(project *models.Project) *models.Node {
 		}
 	}
 	return &nodes[0]
+}
+
+// announceDown sends "app down" once per outage; what continues the
+// sentence says what happens next.
+func (s *HealthService) announceDown(project *models.Project, next string) {
+	if _, ok := s.down[project.ID]; ok {
+		return
+	}
+	since, ok := s.failingSince[project.ID]
+	if !ok {
+		since = time.Now()
+	}
+	s.down[project.ID] = since
+	node := s.nodeName(project.NodeID)
+	notify(Event{
+		Type: EventAppDown, Level: LevelError,
+		Title:   project.Name + " is down",
+		Message: fmt.Sprintf("%s stopped answering on %s, %s", project.Name, node, next),
+		URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
+	})
+}
+
+func (s *HealthService) nodeName(id string) string {
+	var node models.Node
+	if s.db.Select("hostname").First(&node, "id = ?", id).Error != nil {
+		return "an unknown node"
+	}
+	return node.Hostname
 }
 
 func (s *HealthService) markFailed(project *models.Project) {

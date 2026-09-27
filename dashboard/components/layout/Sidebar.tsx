@@ -19,7 +19,7 @@ import {
   Puzzle,
 } from 'lucide-react';
 
-const navigation = [
+const navigation: { name: string; href: string; icon: typeof Puzzle; adminOnly?: boolean }[] = [
   { name: 'Overview',    href: '/',           icon: LayoutDashboard },
   { name: 'Nodes',       href: '/nodes',      icon: Server },
   { name: 'Projects',    href: '/projects',   icon: Box },
@@ -27,7 +27,7 @@ const navigation = [
   { name: 'Jobs',        href: '/jobs',       icon: ListTodo },
   { name: 'Health',      href: '/health',     icon: Heart },
   { name: 'GitHub', href: '/github', icon: Github },
-  { name: 'Plugins', href: '/plugins', icon: Puzzle }
+  { name: 'Plugins', href: '/plugins', icon: Puzzle },
 ];
 
 const bottom = [
@@ -89,7 +89,7 @@ export function Sidebar() {
           <p className="px-3 pb-1.5 text-[10px] uppercase tracking-widest text-text-muted">
             Main
           </p>
-          {navigation.map((item) => {
+          {navigation.filter(item => !item.adminOnly || user?.role === 'admin').map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
             return (

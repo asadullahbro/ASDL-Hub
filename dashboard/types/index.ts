@@ -364,3 +364,54 @@ export interface ProjectPlugin {
   host_port: number;
   created_at: string;
 }
+
+// Where the Hub sends alerts (Discord, Slack, Telegram, ntfy, email, webhook).
+export interface NotificationField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  help?: string;
+  default?: string;
+  secret?: boolean;
+  required?: boolean;
+}
+
+export interface NotificationType {
+  id: string;
+  name: string;
+  description: string;
+  fields: NotificationField[];
+  builtin?: boolean;
+  // Custom plugins: the HTTP request they send (Go templates).
+  request?: { method?: string; url: string; headers?: Record<string, string>; body?: string };
+}
+
+export interface NotificationEvent {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  type: string;
+  // Secret values come back masked; sending them back unchanged keeps them.
+  config: { key: string; value: string }[];
+  events: string[];
+  // Limits app events to these project IDs; empty = all projects.
+  projects: string[];
+  enabled: boolean;
+  last_sent_at: string | null;
+  last_error: string;
+  created_at: string;
+}
+
+export interface NotificationChannelInput {
+  name?: string;
+  type?: string;
+  config?: { key: string; value: string }[];
+  events?: string[];
+  projects?: string[];
+  enabled?: boolean;
+}

@@ -26,6 +26,10 @@ import {
   MaintenanceResult,
   Plugin,
   ProjectPlugin,
+  NotificationType,
+  NotificationEvent,
+  NotificationChannel,
+  NotificationChannelInput,
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -126,6 +130,33 @@ export const api = {
 
   removeCustomPlugin: (id: string): Promise<void> =>
     request<void>(`/plugins/custom/${id}`, { method: 'DELETE' }),
+
+  // Notifications (admin)
+  getNotificationTypes: (): Promise<{ types: NotificationType[]; events: NotificationEvent[] }> =>
+    request<{ types: NotificationType[]; events: NotificationEvent[] }>('/notifications/types'),
+
+  // Admin: add (or replace) a custom notification plugin from its JSON.
+  addNotificationPlugin: (manifest: unknown): Promise<NotificationType> =>
+    request<NotificationType>('/notifications/types', { method: 'POST', body: JSON.stringify(manifest) }),
+
+  removeNotificationPlugin: (id: string): Promise<void> =>
+    request<void>(`/notifications/types/${id}`, { method: 'DELETE' }),
+
+  getNotificationChannels: (): Promise<NotificationChannel[]> =>
+    request<NotificationChannel[]>('/notifications'),
+
+  createNotificationChannel: (input: NotificationChannelInput): Promise<NotificationChannel> =>
+    request<NotificationChannel>('/notifications', { method: 'POST', body: JSON.stringify(input) }),
+
+  updateNotificationChannel: (id: string, input: NotificationChannelInput): Promise<NotificationChannel> =>
+    request<NotificationChannel>(`/notifications/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+
+  deleteNotificationChannel: (id: string): Promise<void> =>
+    request<void>(`/notifications/${id}`, { method: 'DELETE' }),
+
+  // Sends a test message now; rejects with what the service answered.
+  testNotificationChannel: (id: string): Promise<{ sent: boolean }> =>
+    request<{ sent: boolean }>(`/notifications/${id}/test`, { method: 'POST' }),
 
   // Node operations
   getNodeConnection: (id: string): Promise<NodeConnection> =>

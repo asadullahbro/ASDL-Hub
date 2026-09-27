@@ -56,6 +56,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.NodeSSHKey{},
 		&models.Project{},
 		&models.ProjectPlugin{},
+		&models.NotificationChannel{},
 		&models.AllowedRepo{},
 		&models.GitHubToken{},
 		&models.OIDCDeployment{},

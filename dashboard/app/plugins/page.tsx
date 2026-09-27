@@ -2,9 +2,23 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Puzzle, Plus, Trash2, X } from 'lucide-react';
+import { NotificationPlugins } from '@/components/plugins/NotificationPlugins';
 import { api } from '@/lib/api';
 import type { Plugin, Project } from '@/types';
 import { useAuth } from '@/components/providers/AuthProvider';
+
+const NOTIFY_EXAMPLE = `{
+  "id": "google-chat",
+  "name": "Google Chat",
+  "description": "Posts to a Google Chat space through an incoming webhook.",
+  "fields": [
+    { "key": "url", "label": "Webhook URL", "secret": true, "required": true }
+  ],
+  "request": {
+    "url": "{{.config.url}}",
+    "body": "{\\"text\\": {{json .text}}}"
+  }
+}`;
 
 const EXAMPLE = `{
   "id": "memcached",
@@ -25,6 +39,10 @@ export default function PluginsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [manifest, setManifest] = useState(EXAMPLE);
+  // Which tab is shown, and which kind of plugin the custom form adds.
+  const [tab, setTab] = useState<'apps' | 'notifications'>('apps');
+  const [kind, setKind] = useState<'app' | 'notification'>('app');
+  const [notifyReload, setNotifyReload] = useState(0);
   const [attachTo, setAttachTo] = useState<Record<string, string>>({});
   // The attach form, for plugins that need settings or a domain.
   const [form, setForm] = useState<{ plugin: Plugin; project: Project; vars: Record<string, string>; domain: string; path: string } | null>(null);
@@ -52,6 +70,25 @@ export default function PluginsPage() {
     load();
   }, [load]);
 
+  // Links (e.g. from a test notification) open a tab: /plugins?tab=notifications.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'notifications') setTab('notifications');
+  }, []);
+
+  const showTab = (t: 'apps' | 'notifications') => {
+    setTab(t);
+    setError(null);
+    setNotice(null);
+    window.history.replaceState(null, '', t === 'apps' ? '/plugins' : '/plugins?tab=notifications');
+  };
+
+  const openCustom = () => {
+    const k = tab === 'notifications' ? 'notification' : 'app';
+    setKind(k);
+    setManifest(k === 'app' ? EXAMPLE : NOTIFY_EXAMPLE);
+    setAdding(true);
+  };
+
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setError(null);
     setNotice(null);
@@ -72,6 +109,13 @@ export default function PluginsPage() {
       setError('That is not valid JSON.');
       return;
     }
+    if (kind === 'notification') {
+      run(() => api.addNotificationPlugin(parsed), 'Notification plugin added; add it as a channel below.').then(() => {
+        setAdding(false);
+        setNotifyReload(n => n + 1);
+      });
+      return;
+    }
     run(() => api.addCustomPlugin(parsed), 'Plugin added.').then(() => setAdding(false));
   };
 
@@ -82,15 +126,10 @@ export default function PluginsPage() {
           <h1 className="text-xl font-semibold text-text-primary flex items-center gap-2">
             <Puzzle className="h-5 w-5" /> Plugins
           </h1>
-          <p className="text-sm text-text-muted mt-1 max-w-2xl">
-            A plugin is a companion service attached to a project, like a cache or a search engine. It runs on the same
-            node as the project, in a private network only they share, and moves with it on deploys, moves, failovers
-            and maintenance. The project gets its address as an environment variable.
-          </p>
         </div>
         {isAdmin && (
           <button
-            onClick={() => setAdding(true)}
+            onClick={openCustom}
             className="flex-shrink-0 flex items-center gap-1.5 text-xs font-medium bg-accent text-background px-3 py-1.5 rounded hover:opacity-90"
           >
             <Plus className="h-3.5 w-3.5" /> Custom plugin
@@ -98,8 +137,32 @@ export default function PluginsPage() {
         )}
       </div>
 
+      {isAdmin && (
+        <div className="flex gap-1 border-b border-border">
+          {([['apps', 'App plugins'], ['notifications', 'Notifications']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => showTab(id)}
+              className={`px-3 py-2 text-sm -mb-px border-b-2 ${tab === id ? 'border-accent text-text-primary' : 'border-transparent text-text-muted hover:text-text-primary'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && <div className="text-sm text-status-red">{error}</div>}
       {notice && <div className="text-sm text-status-green">{notice}</div>}
+
+      {tab === 'notifications' && isAdmin ? (
+        <NotificationPlugins reloadKey={notifyReload} />
+      ) : (
+      <>
+      <p className="text-sm text-text-muted max-w-2xl">
+        An app plugin is a companion service attached to a project, like a cache or a search engine. It runs on the same
+        node as the project, in a private network only they share, and moves with it on deploys, moves, failovers and
+        maintenance. The project gets its address as an environment variable.
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {plugins.map(p => {
@@ -175,6 +238,9 @@ export default function PluginsPage() {
         })}
       </div>
 
+      </>
+      )}
+
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-surface border border-border rounded-lg w-full max-w-lg">
@@ -240,12 +306,38 @@ export default function PluginsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="bg-surface border border-border rounded-lg w-full max-w-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h2 className="font-medium text-text-primary">Add a custom plugin</h2>
+              <h2 className="font-medium text-text-primary">Add a custom {kind === 'app' ? 'app' : 'notification'} plugin</h2>
               <button onClick={() => setAdding(false)} className="text-text-muted hover:text-text-primary">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="p-5 space-y-3">
+              <div className="flex gap-1.5">
+                {(['app', 'notification'] as const).map(k => (
+                  <button
+                    key={k}
+                    onClick={() => {
+                      setKind(k);
+                      setManifest(k === 'app' ? EXAMPLE : NOTIFY_EXAMPLE);
+                    }}
+                    className={`px-2.5 py-1 rounded text-xs border ${kind === k ? 'border-accent text-text-primary' : 'border-border text-text-muted'}`}
+                  >
+                    {k === 'app' ? 'App plugin (a container)' : 'Notification plugin (an HTTP request)'}
+                  </button>
+                ))}
+              </div>
+              {kind === 'notification' ? (
+                <p className="text-xs text-text-muted">
+                  Describe the service&apos;s settings in <code>fields</code> and the request to send in <code>request</code>{' '}
+                  (<code>method</code>, <code>url</code>, <code>headers</code>, <code>body</code>). They are Go templates:{' '}
+                  <code>{'{{.title}}'}</code>, <code>{'{{.message}}'}</code>, <code>{'{{.text}}'}</code> (everything as plain
+                  text), <code>{'{{.url}}'}</code>, <code>{'{{.level}}'}</code>, <code>{'{{.emoji}}'}</code>,{' '}
+                  <code>{'{{.color}}'}</code>, <code>{'{{.event}}'}</code>, <code>{'{{.project}}'}</code>,{' '}
+                  <code>{'{{.node}}'}</code> and <code>{'{{.config.KEY}}'}</code> for a field. Wrap text in{' '}
+                  <code>{'{{json …}}'}</code> inside a JSON body so it is quoted and escaped. Use the same id again to
+                  replace a plugin.
+                </p>
+              ) : (
               <p className="text-xs text-text-muted">
                 Describe the container in JSON. In <code>provides</code>, <code>command</code>, <code>env</code> and{' '}
                 <code>files</code> you can use <code>{'{{host}}'}</code> (the plugin&apos;s name in the project&apos;s network),{' '}
@@ -253,6 +345,7 @@ export default function PluginsPage() {
                 <code>{'{"key": "password", "label": "Password", "secret": true, "generate": 32}'}</code>). The Hub only stores this
                 description; the image is downloaded only on nodes that run it.
               </p>
+              )}
               <textarea
                 rows={14}
                 value={manifest}

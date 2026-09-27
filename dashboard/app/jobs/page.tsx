@@ -18,6 +18,12 @@ export default function JobsPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 0, limit: 20 });
+
+  // Links from notifications open a job directly: /jobs?id=<job id>.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (id) setSelectedJobId(id);
+  }, []);
   const limit = 20;
 
   async function loadJobs() {

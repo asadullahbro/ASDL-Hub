@@ -41,6 +41,7 @@ type UpdateService struct {
 	checkedAt time.Time
 	checkErr  string
 	upgrading string // target version while an upgrade is running
+	announced string // the release last announced to notification channels
 }
 
 func NewUpdateService(current string) *UpdateService {
@@ -85,6 +86,19 @@ func (s *UpdateService) check() {
 	s.mu.Unlock()
 	if newerVersion(rel.TagName, s.current) {
 		log.Printf("⬆️ ASDL Hub %s is available (running %s)", rel.TagName, s.current)
+		s.mu.Lock()
+		first := s.announced != rel.TagName
+		s.announced = rel.TagName
+		s.mu.Unlock()
+		if first {
+			notify(Event{
+				Type: EventHubUpdate, Level: LevelInfo,
+				Title:   "ASDL Hub " + rel.TagName + " is available",
+				Message: fmt.Sprintf("You're running %s. Install it from the dashboard with Update now.", s.current),
+				Fields:  []EventField{{Name: "Release notes", Value: rel.HTMLURL}},
+				URL:     link("/settings"),
+			})
+		}
 	}
 }
 
