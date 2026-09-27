@@ -368,6 +368,12 @@ func (s *ProjectService) Redeploy(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "node_id": job.NodeID})
 }
 
+// RedeployProject restarts project with its current settings and plugins.
+func (s *ProjectService) RedeployProject(project *models.Project) error {
+	_, err := s.redeploy(project)
+	return err
+}
+
 func (s *ProjectService) redeploy(project *models.Project) (*models.Job, error) {
 	if project.Image == "" {
 		return nil, fmt.Errorf("project has no image yet; deploy it from CI first")
@@ -446,6 +452,7 @@ func (s *ProjectService) DeleteProject(c *gin.Context) {
 			Update("status", models.JobStatusCancelled)
 	}
 
+	s.db.Where("project_id = ?", id).Delete(&models.ProjectPlugin{})
 	if err := s.db.Delete(&project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -456,7 +463,7 @@ func (s *ProjectService) DeleteProject(c *gin.Context) {
 			NodeID:     nodeID,
 			Type:       models.JobTypeFailoverStop,
 			Status:     models.JobStatusPending,
-			Command:    BuildStopCommand(project.Name),
+			Command:    BuildRemoveProjectCommand(&project),
 			MaxRetries: 2,
 			CreatedAt:  time.Now(),
 		}

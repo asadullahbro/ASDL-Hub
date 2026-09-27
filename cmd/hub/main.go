@@ -88,7 +88,6 @@ func main() {
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
 	nodeOps := services.NewNodeOpsService(database, deployer)
-	pluginService := services.NewPluginService(database)
 
 	// Nginx service — generates and reloads nginx config from running projects
 	nginxService := services.NewNginxService(database)
@@ -102,6 +101,7 @@ func main() {
 	// Project service — tracks running projects and their health state
 	projectService := services.NewProjectService(database, deployer)
 	projectService.RepairInvalidPorts()
+	pluginService := services.NewPluginService(database, projectService.RedeployProject)
 
 	// Regenerate nginx when a deploy or project edit changes where a domain points
 	updateRoutes := func() {
@@ -542,10 +542,11 @@ echo "Agent updated successfully"
 		// Admin only - Settings
 		settings := protected.Group("/settings")
 		settings.Use(middleware.RequireRole(models.RoleAdmin))
-		protected.PUT("/plugins/databases/config", middleware.RequireRole(models.RoleAdmin), pluginService.SetDatabases)
 		protected.POST("/plugins/custom", middleware.RequireRole(models.RoleAdmin), pluginService.AddCustom)
 		protected.DELETE("/plugins/custom/:id", middleware.RequireRole(models.RoleAdmin), pluginService.RemoveCustom)
-		protected.PUT("/plugins/:id", middleware.RequireRole(models.RoleAdmin), pluginService.SetInstalled)
+		protected.GET("/projects/:id/plugins", pluginService.ProjectPlugins)
+		protected.POST("/projects/:id/plugins", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Attach)
+		protected.DELETE("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Detach)
 		// Everyone signed in sees whether an update exists; admins install it.
 		protected.GET("/system/version", updateService.Status)
 		protected.POST("/system/update", middleware.RequireRole(models.RoleAdmin), updateService.Update)

@@ -51,6 +51,7 @@ func (d *Deployer) Dispatch(project *models.Project, node *models.Node, image st
 		Project:           project,
 		Image:             image,
 		PreferredHostPort: d.preferredHostPort(project, node.ID),
+		Plugins:           resolvePlugins(d.db, project),
 	}
 
 	var env []string

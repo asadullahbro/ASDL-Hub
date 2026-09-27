@@ -326,27 +326,36 @@ export interface MaintenanceResult {
   stays: string[];
 }
 
+// A companion container attached to a project: runs next to it on its node,
+// moves with it, and hands it environment variables (e.g. REDIS_URL).
+export interface PluginVar {
+  key: string;
+  label: string;
+  default?: string;
+  secret?: boolean;
+  required?: boolean;
+  generate?: number;
+}
+
 export interface Plugin {
   id: string;
   name: string;
   description: string;
-  footprint: string;
-  status: 'available' | 'coming_soon';
-  installable: boolean;
-  installed: boolean;
-  config?: unknown;
-  custom?: boolean;
-  source?: string;
+  image: string;
+  port: number;
+  command?: string[];
+  env?: Record<string, string>;
+  files?: { path: string; content: string }[];
+  vars?: PluginVar[];
+  provides: Record<string, string>;
+  builtin?: boolean;
+  attached_to: string[];
 }
 
-export interface DatabaseEntry {
-  name: string;
-  engine: string;
-  primary_node: string;
-  primary_endpoint: string;
-  standby_node?: string;
-  standby_endpoint?: string;
-  backups?: string;
-  projects: string[];
-  notes?: string;
+export interface ProjectPlugin {
+  id: string;
+  project_id: string;
+  plugin_id: string;
+  vars: { key: string; value: string }[];
+  created_at: string;
 }

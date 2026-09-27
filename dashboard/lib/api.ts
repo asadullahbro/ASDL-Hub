@@ -25,7 +25,7 @@ import {
   NodeConnection,
   MaintenanceResult,
   Plugin,
-  DatabaseEntry,
+  ProjectPlugin,
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -102,14 +102,19 @@ export const api = {
   // Plugins
   getPlugins: (): Promise<Plugin[]> => request<Plugin[]>('/plugins'),
 
-  setPluginInstalled: (id: string, installed: boolean, manual = false): Promise<Plugin> =>
-    request<Plugin>(`/plugins/${id}`, { method: 'PUT', body: JSON.stringify({ installed, manual }) }),
+  // Admin: add a custom plugin from its JSON description.
+  addCustomPlugin: (manifest: unknown): Promise<Plugin> =>
+    request<Plugin>('/plugins/custom', { method: 'POST', body: JSON.stringify(manifest) }),
 
-  setDatabases: (databases: DatabaseEntry[]): Promise<Plugin> =>
-    request<Plugin>('/plugins/databases/config', { method: 'PUT', body: JSON.stringify({ databases }) }),
+  getProjectPlugins: (projectId: string): Promise<ProjectPlugin[]> =>
+    request<ProjectPlugin[]>(`/projects/${projectId}/plugins`),
 
-  addCustomPlugin: (p: { id: string; name: string; description: string; source: string; footprint: string }): Promise<Plugin> =>
-    request<Plugin>('/plugins/custom', { method: 'POST', body: JSON.stringify(p) }),
+  // Both redeploy the project so the change takes effect.
+  attachPlugin: (projectId: string, pluginId: string, vars: { key: string; value: string }[] = []): Promise<{ redeploying: boolean }> =>
+    request<{ redeploying: boolean }>(`/projects/${projectId}/plugins`, { method: 'POST', body: JSON.stringify({ plugin_id: pluginId, vars }) }),
+
+  detachPlugin: (projectId: string, pluginId: string): Promise<{ redeploying: boolean }> =>
+    request<{ redeploying: boolean }>(`/projects/${projectId}/plugins/${pluginId}`, { method: 'DELETE' }),
 
   removeCustomPlugin: (id: string): Promise<void> =>
     request<void>(`/plugins/custom/${id}`, { method: 'DELETE' }),

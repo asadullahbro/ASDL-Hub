@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import { Project, Node } from '../../types';
+import { Project, Node, Plugin } from '../../types';
 import { Pagination } from '@/components/ui/Pagination';
 
 // Parses .env text into env vars: KEY=value lines, ignoring blanks and
@@ -54,16 +54,21 @@ export default function ProjectsPage() {
   });
   const [saving, setSaving] = useState(false);
 
+  // Plugins, to show which are attached to each project
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
+
   // Delete state
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   async function loadData() {
     try {
-      const [projectsResponse, nodesData] = await Promise.all([
+      const [projectsResponse, nodesData, pluginList] = await Promise.all([
         api.getProjects(page, limit),
         api.getNodes(),
+        api.getPlugins().catch(() => [] as Plugin[]),
       ]);
+      setPlugins(pluginList);
       setProjects(projectsResponse.data);
       setPagination(projectsResponse.pagination);
       setNodes(nodesData);
@@ -294,6 +299,31 @@ export default function ProjectsPage() {
                       {project.last_deployed ? new Date(project.last_deployed).toLocaleString() : 'N/A'}
                     </span>
                   </div>
+                  {plugins.some(pl => pl.attached_to.includes(project.name)) && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs">🧩</span>
+                      {plugins.filter(pl => pl.attached_to.includes(project.name)).map(pl => (
+                        <span key={pl.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-surface-hover text-text-secondary">
+                          {pl.name}
+                          <button
+                            title={`Remove ${pl.name} (redeploys ${project.name})`}
+                            onClick={async () => {
+                              if (!confirm(`Remove ${pl.name} from ${project.name}? It is redeployed without it.`)) return;
+                              try {
+                                await api.detachPlugin(project.id, pl.id);
+                                await loadData();
+                              } catch (err) {
+                                setError(err instanceof Error ? err.message : 'Failed to remove plugin');
+                              }
+                            }}
+                            className="text-text-muted hover:text-status-red leading-none"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}

@@ -2,280 +2,256 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
-	"net/url"
-	"regexp"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/asdl/hub/internal/models"
 )
 
-// Plugins are optional features listed in the dashboard. The Hub only ships
-// their description: what a plugin needs to run (containers, timers, scripts)
-// is fetched onto the nodes you choose when you install it, so Hubs and nodes
-// that don't use a plugin carry none of it. The installer isn't built yet, so
-// installing is refused for now; Installed records a plugin set up by hand.
-type Plugin struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	// Footprint says what installing puts where, so nothing arrives unannounced.
-	Footprint   string          `json:"footprint"`
-	Status      string          `json:"status"` // "available" or "coming_soon"
-	Installable bool            `json:"installable"`
-	Installed   bool            `json:"installed"`
-	Config      json.RawMessage `json:"config,omitempty"`
-	// Custom plugins are added by an admin; Source is where their files live.
-	Custom bool   `json:"custom,omitempty"`
-	Source string `json:"source,omitempty"`
-}
+// Custom plugin manifests are stored as one JSON list in settings.
+const customPluginsKey = "plugins.custom.v2"
 
-var pluginRegistry = []Plugin{
-	{
-		ID:   "databases",
-		Name: "Databases",
-		Description: "Keep track of the databases your apps depend on: where the primary runs, " +
-			"which node holds a live standby, and which projects use it.",
-		Footprint: "On the primary's node: a nightly backup timer and a replication access keeper. " +
-			"On the standby node: a Postgres container (same image as the primary) and its firewall rule.",
-		Status: "available",
-	},
-	{
-		ID:   "notifications",
-		Name: "Notifications",
-		Description: "Get told when a node goes offline, an app fails over, a deploy fails or an " +
-			"update is available — on Discord, ntfy or email.",
-		Footprint: "Nothing on the nodes; the Hub sends the messages.",
-		Status:    "coming_soon",
-	},
-}
-
-// DatabaseEntry is one database the Databases plugin knows about.
-type DatabaseEntry struct {
-	Name            string   `json:"name"`
-	Engine          string   `json:"engine"` // e.g. "Supabase (Postgres 15)"
-	PrimaryNode     string   `json:"primary_node"`
-	PrimaryEndpoint string   `json:"primary_endpoint"` // host:port on the mesh
-	StandbyNode     string   `json:"standby_node,omitempty"`
-	StandbyEndpoint string   `json:"standby_endpoint,omitempty"`
-	Backups         string   `json:"backups,omitempty"` // where and how often
-	Projects        []string `json:"projects"`          // project names using it
-	Notes           string   `json:"notes,omitempty"`
-}
-
-var (
-	endpointRe = regexp.MustCompile(`^[A-Za-z0-9.-]+:\d{1,5}$`)
-	pluginIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,39}$`)
-)
-
-const customPluginsKey = "plugins.custom"
-
-type PluginService struct {
-	db *gorm.DB
-}
-
-func NewPluginService(db *gorm.DB) *PluginService {
-	return &PluginService{db: db}
-}
-
-func pluginKey(id, field string) string { return "plugin." + id + "." + field }
-
-func (s *PluginService) setting(key string) (string, bool) {
-	var st models.Setting
-	if err := s.db.First(&st, "key = ?", key).Error; err != nil {
-		return "", false
+// PluginCatalog returns every plugin the Hub knows: built-in and custom.
+func PluginCatalog(db *gorm.DB) map[string]PluginManifest {
+	out := map[string]PluginManifest{}
+	for _, m := range builtinPlugins {
+		out[m.ID] = m
 	}
-	return st.Value, true
-}
-
-func (s *PluginService) save(key, value string) error {
-	return s.db.Clauses(clause.OnConflict{UpdateAll: true}).
-		Create(&models.Setting{Key: key, Value: value, UpdatedAt: time.Now()}).Error
-}
-
-func (s *PluginService) customPlugins() []Plugin {
-	var out []Plugin
-	if v, ok := s.setting(customPluginsKey); ok {
-		_ = json.Unmarshal([]byte(v), &out)
+	for _, m := range customPlugins(db) {
+		if _, taken := out[m.ID]; !taken {
+			out[m.ID] = m
+		}
 	}
 	return out
 }
 
-func (s *PluginService) all() []Plugin {
-	return append(append([]Plugin{}, pluginRegistry...), s.customPlugins()...)
+func customPlugins(db *gorm.DB) []PluginManifest {
+	var st models.Setting
+	if db.First(&st, "key = ?", customPluginsKey).Error != nil {
+		return nil
+	}
+	var out []PluginManifest
+	if err := json.Unmarshal([]byte(st.Value), &out); err != nil {
+		log.Printf("⚠️ custom plugins: %v", err)
+	}
+	return out
 }
 
-func (s *PluginService) find(id string) (Plugin, bool) {
-	for _, p := range s.all() {
-		if p.ID == id {
-			return p, true
+func saveCustomPlugins(db *gorm.DB, list []PluginManifest) error {
+	b, _ := json.Marshal(list)
+	return db.Clauses(clause.OnConflict{UpdateAll: true}).
+		Create(&models.Setting{Key: customPluginsKey, Value: string(b), UpdatedAt: time.Now()}).Error
+}
+
+// resolvePlugins returns the plugins attached to project, ready to deploy.
+// A plugin whose definition was removed is skipped (and logged).
+func resolvePlugins(db *gorm.DB, project *models.Project) []ResolvedPlugin {
+	var attached []models.ProjectPlugin
+	db.Where("project_id = ?", project.ID).Order("plugin_id").Find(&attached)
+	if len(attached) == 0 {
+		return nil
+	}
+	catalog := PluginCatalog(db)
+	out := make([]ResolvedPlugin, 0, len(attached))
+	for _, a := range attached {
+		m, ok := catalog[a.PluginID]
+		if !ok {
+			log.Printf("⚠️ %s has plugin %s attached, but no such plugin exists any more; skipping it", project.Name, a.PluginID)
+			continue
+		}
+		out = append(out, m.Resolve(project, a.Vars))
+	}
+	return out
+}
+
+// PluginService serves the plugin catalog and attaches plugins to projects.
+type PluginService struct {
+	db *gorm.DB
+	// redeploy restarts a project with its current settings (and plugins).
+	redeploy func(*models.Project) error
+}
+
+func NewPluginService(db *gorm.DB, redeploy func(*models.Project) error) *PluginService {
+	return &PluginService{db: db, redeploy: redeploy}
+}
+
+type pluginInfo struct {
+	PluginManifest
+	AttachedTo []string `json:"attached_to"` // project names
+}
+
+// List handles GET /plugins: the catalog, with the projects using each.
+func (s *PluginService) List(c *gin.Context) {
+	var attached []models.ProjectPlugin
+	s.db.Find(&attached)
+	names := map[string]string{}
+	var projects []models.Project
+	s.db.Select("id", "name").Find(&projects)
+	for _, p := range projects {
+		names[p.ID] = p.Name
+	}
+	users := map[string][]string{}
+	for _, a := range attached {
+		if n, ok := names[a.ProjectID]; ok {
+			users[a.PluginID] = append(users[a.PluginID], n)
 		}
 	}
-	return Plugin{}, false
-}
-
-func (s *PluginService) load(p Plugin) Plugin {
-	if v, ok := s.setting(pluginKey(p.ID, "installed")); ok {
-		p.Installed = v == "true"
+	out := []pluginInfo{}
+	for _, m := range PluginCatalog(s.db) {
+		u := users[m.ID]
+		sort.Strings(u)
+		if u == nil {
+			u = []string{}
+		}
+		out = append(out, pluginInfo{PluginManifest: m, AttachedTo: u})
 	}
-	if v, ok := s.setting(pluginKey(p.ID, "config")); ok && json.Valid([]byte(v)) {
-		p.Config = json.RawMessage(v)
-	}
-	return p
-}
-
-// List handles GET /plugins.
-func (s *PluginService) List(c *gin.Context) {
-	out := []Plugin{}
-	for _, p := range s.all() {
-		out = append(out, s.load(p))
-	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Builtin != out[j].Builtin {
+			return out[i].Builtin
+		}
+		return out[i].Name < out[j].Name
+	})
 	c.JSON(http.StatusOK, out)
 }
 
-// SetInstalled handles PUT /plugins/:id {"installed": bool}. Marking a
-// plugin installed is only for one set up by hand, with
-// {"installed": true, "manual": true}; installing through the Hub needs the
-// installer, which doesn't exist yet.
-func (s *PluginService) SetInstalled(c *gin.Context) {
-	p, ok := s.find(c.Param("id"))
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "unknown plugin"})
-		return
-	}
-	var req struct {
-		Installed *bool `json:"installed"`
-		Manual    bool  `json:"manual"`
-	}
-	if err := c.BindJSON(&req); err != nil || req.Installed == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": `send {"installed": true|false}`})
-		return
-	}
-	if *req.Installed {
-		switch {
-		case p.Status != "available":
-			c.JSON(http.StatusConflict, gin.H{"error": p.Name + " isn't available yet"})
-			return
-		case !p.Installable && !req.Manual:
-			c.JSON(http.StatusNotImplemented, gin.H{"error": "installing plugins from the Hub isn't available yet"})
-			return
-		}
-	}
-	if err := s.save(pluginKey(p.ID, "installed"), map[bool]string{true: "true", false: "false"}[*req.Installed]); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, s.load(p))
-}
-
-// SetDatabases handles PUT /plugins/databases/config {"databases": [...]}.
-func (s *PluginService) SetDatabases(c *gin.Context) {
-	var req struct {
-		Databases []DatabaseEntry `json:"databases"`
-	}
-	if err := c.BindJSON(&req); err != nil || req.Databases == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": `send {"databases": [...]}`})
-		return
-	}
-	seen := map[string]bool{}
-	for i, d := range req.Databases {
-		switch {
-		case d.Name == "":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "every database needs a name"})
-			return
-		case seen[d.Name]:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "duplicate database name " + d.Name})
-			return
-		case !endpointRe.MatchString(d.PrimaryEndpoint):
-			c.JSON(http.StatusBadRequest, gin.H{"error": d.Name + ": primary endpoint must be host:port"})
-			return
-		case d.StandbyEndpoint != "" && !endpointRe.MatchString(d.StandbyEndpoint):
-			c.JSON(http.StatusBadRequest, gin.H{"error": d.Name + ": standby endpoint must be host:port"})
-			return
-		}
-		if d.Projects == nil {
-			req.Databases[i].Projects = []string{}
-		}
-		seen[d.Name] = true
-	}
-	raw, _ := json.Marshal(req)
-	if err := s.save(pluginKey("databases", "config"), string(raw)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	p, _ := s.find("databases")
-	c.JSON(http.StatusOK, s.load(p))
-}
-
-// AddCustom handles POST /plugins/custom: add a plugin to the catalog. Like
-// the built-in ones it is only a description; nothing is downloaded.
+// AddCustom handles POST /plugins/custom with a manifest (admin).
 func (s *PluginService) AddCustom(c *gin.Context) {
-	var req struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Source      string `json:"source"`
-		Footprint   string `json:"footprint"`
+	var m PluginManifest
+	if err := c.ShouldBindJSON(&m); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plugin JSON: " + err.Error()})
+		return
 	}
-	if err := c.BindJSON(&req); err != nil {
+	m.Builtin = false
+	if err := m.Validate(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	u, err := url.Parse(req.Source)
-	switch {
-	case !pluginIDRe.MatchString(req.ID):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id: 2-40 lowercase letters, digits or dashes"})
-		return
-	case strings.TrimSpace(req.Name) == "":
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
-		return
-	case err != nil || u.Scheme != "https" || u.Host == "":
-		c.JSON(http.StatusBadRequest, gin.H{"error": "source must be an https:// link to the plugin's repository or manifest"})
+	if _, taken := PluginCatalog(s.db)[m.ID]; taken {
+		c.JSON(http.StatusConflict, gin.H{"error": "a plugin with id " + m.ID + " already exists"})
 		return
 	}
-	if _, exists := s.find(req.ID); exists {
-		c.JSON(http.StatusConflict, gin.H{"error": "a plugin called " + req.ID + " already exists"})
-		return
-	}
-	p := Plugin{ID: req.ID, Name: strings.TrimSpace(req.Name), Description: strings.TrimSpace(req.Description),
-		Footprint: strings.TrimSpace(req.Footprint), Source: req.Source, Status: "available", Custom: true}
-	if err := s.saveCustom(append(s.customPlugins(), p)); err != nil {
+	if err := saveCustomPlugins(s.db, append(customPlugins(s.db), m)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, p)
+	c.JSON(http.StatusCreated, m)
 }
 
-// RemoveCustom handles DELETE /plugins/custom/:id.
+// RemoveCustom handles DELETE /plugins/custom/:id (admin). Refused while a
+// project still uses it.
 func (s *PluginService) RemoveCustom(c *gin.Context) {
 	id := c.Param("id")
-	kept := []Plugin{}
+	var n int64
+	s.db.Model(&models.ProjectPlugin{}).Where("plugin_id = ?", id).Count(&n)
+	if n > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%d project(s) still use this plugin; remove it from them first", n)})
+		return
+	}
+	list := customPlugins(s.db)
+	kept := list[:0]
 	found := false
-	for _, p := range s.customPlugins() {
-		if p.ID == id {
+	for _, m := range list {
+		if m.ID == id {
 			found = true
 			continue
 		}
-		kept = append(kept, p)
+		kept = append(kept, m)
 	}
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no custom plugin called " + id})
+		c.JSON(http.StatusNotFound, gin.H{"error": "no custom plugin " + id})
 		return
 	}
-	if err := s.saveCustom(kept); err != nil {
+	if err := saveCustomPlugins(s.db, kept); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	s.db.Where("key LIKE ?", "plugin."+id+".%").Delete(&models.Setting{})
-	c.JSON(http.StatusOK, gin.H{"message": "removed"})
+	c.JSON(http.StatusOK, gin.H{"message": "plugin removed"})
 }
 
-func (s *PluginService) saveCustom(list []Plugin) error {
-	raw, _ := json.Marshal(list)
-	return s.save(customPluginsKey, string(raw))
+// ProjectPlugins handles GET /projects/:id/plugins.
+func (s *PluginService) ProjectPlugins(c *gin.Context) {
+	var attached []models.ProjectPlugin
+	s.db.Where("project_id = ?", c.Param("id")).Order("plugin_id").Find(&attached)
+	if attached == nil {
+		attached = []models.ProjectPlugin{}
+	}
+	c.JSON(http.StatusOK, attached)
+}
+
+// Attach handles POST /projects/:id/plugins {"plugin_id", "vars"}. The
+// project is redeployed so the plugin starts next to it.
+func (s *PluginService) Attach(c *gin.Context) {
+	var project models.Project
+	if err := s.db.First(&project, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+	var req struct {
+		PluginID string          `json:"plugin_id"`
+		Vars     []models.EnvVar `json:"vars"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	m, ok := PluginCatalog(s.db)[req.PluginID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no plugin " + req.PluginID})
+		return
+	}
+	var existing models.ProjectPlugin
+	if s.db.First(&existing, "project_id = ? AND plugin_id = ?", project.ID, m.ID).Error == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": project.Name + " already has " + m.Name})
+		return
+	}
+	vars, err := m.FillVars(req.Vars)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pp := models.ProjectPlugin{ID: uuid.New().String(), ProjectID: project.ID, PluginID: m.ID, Vars: vars, CreatedAt: time.Now()}
+	if err := s.db.Create(&pp).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("🧩 Attached plugin %s to %s", m.ID, project.Name)
+	c.JSON(http.StatusCreated, gin.H{"plugin": pp, "redeploying": s.redeployNow(&project)})
+}
+
+// Detach handles DELETE /projects/:id/plugins/:plugin. The project is
+// redeployed, which removes the plugin's container.
+func (s *PluginService) Detach(c *gin.Context) {
+	var project models.Project
+	if err := s.db.First(&project, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+	res := s.db.Where("project_id = ? AND plugin_id = ?", project.ID, c.Param("plugin")).Delete(&models.ProjectPlugin{})
+	if res.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": project.Name + " doesn't have that plugin"})
+		return
+	}
+	log.Printf("🧩 Removed plugin %s from %s", c.Param("plugin"), project.Name)
+	c.JSON(http.StatusOK, gin.H{"message": "plugin removed", "redeploying": s.redeployNow(&project)})
+}
+
+// redeployNow restarts a deployed project so plugin changes take effect;
+// false if it has nothing deployed yet (its first deploy will include them).
+func (s *PluginService) redeployNow(p *models.Project) bool {
+	if p.Image == "" || s.redeploy == nil {
+		return false
+	}
+	if err := s.redeploy(p); err != nil {
+		log.Printf("⚠️ Plugins of %s changed but it could not be redeployed yet: %v", p.Name, err)
+		return false
+	}
+	return true
 }

@@ -15,7 +15,7 @@ import (
 
 func newFailoverEnv(t *testing.T) (*HealthService, *JobService, *gorm.DB) {
 	t.Helper()
-	db := testutil.NewDB(t, &models.Node{}, &models.Job{}, &models.Migration{}, &models.Project{},
+	db := testutil.NewDB(t, &models.Node{}, &models.Job{}, &models.Migration{}, &models.Project{}, &models.ProjectPlugin{},
 		&models.Deployment{}, &models.OIDCDeployment{}, &models.Setting{}, &models.GitHubToken{})
 	db.Create(&models.Node{ID: "dead", Hostname: "dead", VPNIP: "10.0.0.2", Online: false})
 	db.Create(&models.Node{ID: "good", Hostname: "good", VPNIP: "10.0.0.3", Online: true, HealthScore: 90})

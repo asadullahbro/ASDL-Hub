@@ -263,7 +263,7 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 			NodeID:     previousNode,
 			Type:       models.JobTypeFailoverStop,
 			Status:     models.JobStatusPending,
-			Command:    BuildStopCommand(project.Name),
+			Command:    BuildRemoveProjectCommand(&project),
 			MaxRetries: 2,
 			CreatedAt:  now,
 		}
