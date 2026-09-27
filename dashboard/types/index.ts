@@ -323,3 +323,28 @@ export interface MaintenanceResult {
   moving: string[];
   stays: string[];
 }
+
+export interface Plugin {
+  id: string;
+  name: string;
+  description: string;
+  footprint: string;
+  status: 'available' | 'coming_soon';
+  installable: boolean;
+  installed: boolean;
+  config?: unknown;
+  custom?: boolean;
+  source?: string;
+}
+
+export interface DatabaseEntry {
+  name: string;
+  engine: string;
+  primary_node: string;
+  primary_endpoint: string;
+  standby_node?: string;
+  standby_endpoint?: string;
+  backups?: string;
+  projects: string[];
+  notes?: string;
+}

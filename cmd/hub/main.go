@@ -88,6 +88,7 @@ func main() {
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
 	nodeOps := services.NewNodeOpsService(database, deployer)
+	pluginService := services.NewPluginService(database)
 
 	// Nginx service — generates and reloads nginx config from running projects
 	nginxService := services.NewNginxService(database)
@@ -352,6 +353,7 @@ func main() {
 			viewer.GET("/nodes/:id/details", nodeService.GetNodeDetails)
 			viewer.GET("/nodes/:id", nodeService.Get)
 			viewer.GET("/nodes/:id/connection", nodeOps.Connection)
+			viewer.GET("/plugins", pluginService.List)
 
 			viewer.GET("/jobs", jobService.List)
 			viewer.GET("/jobs/:id", jobService.Get)
@@ -540,6 +542,10 @@ echo "Agent updated successfully"
 		// Admin only - Settings
 		settings := protected.Group("/settings")
 		settings.Use(middleware.RequireRole(models.RoleAdmin))
+		protected.PUT("/plugins/databases/config", middleware.RequireRole(models.RoleAdmin), pluginService.SetDatabases)
+		protected.POST("/plugins/custom", middleware.RequireRole(models.RoleAdmin), pluginService.AddCustom)
+		protected.DELETE("/plugins/custom/:id", middleware.RequireRole(models.RoleAdmin), pluginService.RemoveCustom)
+		protected.PUT("/plugins/:id", middleware.RequireRole(models.RoleAdmin), pluginService.SetInstalled)
 		// Everyone signed in sees whether an update exists; admins install it.
 		protected.GET("/system/version", updateService.Status)
 		protected.POST("/system/update", middleware.RequireRole(models.RoleAdmin), updateService.Update)

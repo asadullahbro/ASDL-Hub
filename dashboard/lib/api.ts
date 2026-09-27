@@ -24,6 +24,8 @@ import {
   GitHubToken,
   NodeConnection,
   MaintenanceResult,
+  Plugin,
+  DatabaseEntry,
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -96,6 +98,21 @@ export const api = {
   // Hub version and updates
   getSystemVersion: (refresh = false): Promise<SystemVersion> =>
     request<SystemVersion>(`/system/version${refresh ? '?refresh=1' : ''}`),
+
+  // Plugins
+  getPlugins: (): Promise<Plugin[]> => request<Plugin[]>('/plugins'),
+
+  setPluginInstalled: (id: string, installed: boolean, manual = false): Promise<Plugin> =>
+    request<Plugin>(`/plugins/${id}`, { method: 'PUT', body: JSON.stringify({ installed, manual }) }),
+
+  setDatabases: (databases: DatabaseEntry[]): Promise<Plugin> =>
+    request<Plugin>('/plugins/databases/config', { method: 'PUT', body: JSON.stringify({ databases }) }),
+
+  addCustomPlugin: (p: { id: string; name: string; description: string; source: string; footprint: string }): Promise<Plugin> =>
+    request<Plugin>('/plugins/custom', { method: 'POST', body: JSON.stringify(p) }),
+
+  removeCustomPlugin: (id: string): Promise<void> =>
+    request<void>(`/plugins/custom/${id}`, { method: 'DELETE' }),
 
   // Node operations
   getNodeConnection: (id: string): Promise<NodeConnection> =>
