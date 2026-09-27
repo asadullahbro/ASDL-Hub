@@ -85,7 +85,7 @@ is out, or run the same command again; your data and settings are kept. To insta
 a specific version, put it before the project name:
 
 ```bash
-curl -fsSL https://get.asdl.website/v0.8.0/asdl-hub | sudo bash
+curl -fsSL https://get.asdl.website/v0.9.0/asdl-hub | sudo bash
 ```
 
 ## Get started
