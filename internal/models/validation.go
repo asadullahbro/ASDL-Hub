@@ -33,6 +33,18 @@ func ParsePortMapping(mapping string) (host, container string, err error) {
 
 // ValidateProjectConfig checks the user-supplied parts of a project that end
 // up in a docker run command or an nginx config.
+var routePathRe = regexp.MustCompile(`^/([A-Za-z0-9._~-]+/)*$`)
+
+// ValidateRoutePath checks a project's route path: empty, or like "/api/"
+// (starts and ends with "/").
+func ValidateRoutePath(path string) error {
+	if path != "" && (len(path) > 200 || !routePathRe.MatchString(path) ||
+		strings.Contains(path, "/./") || strings.Contains(path, "/../")) {
+		return fmt.Errorf("invalid path %q: use something like /api/ (starting and ending with /)", path)
+	}
+	return nil
+}
+
 func ValidateProjectConfig(name, domain string, ports []string, envVars []EnvVar) error {
 	if name != "" && !projectNameRe.MatchString(name) {
 		return fmt.Errorf("invalid project name %q: use letters, digits, '.', '_' or '-'", name)

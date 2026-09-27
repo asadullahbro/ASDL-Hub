@@ -125,6 +125,8 @@ export interface Project {
   name: string;
   description: string;
   domain: string;
+  // Serves the project under this path of its domain ("/api/"); "" = whole domain.
+  route_path?: string;
   repository: string;
   node_id: string;
   status: string;

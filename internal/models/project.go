@@ -11,6 +11,10 @@ type Project struct {
 	Name        string `gorm:"size:255;not null" json:"name"`
 	Description string `gorm:"size:500" json:"description"`
 	Domain      string `gorm:"size:255" json:"domain"`
+	// RoutePath serves the project under this path of its domain ("/api/"),
+	// with the path stripped before requests reach it. Empty means the whole
+	// domain. Several projects can share a domain with different paths.
+	RoutePath string `gorm:"size:255;not null;default:''" json:"route_path"`
 	// Unique among projects that have one; projects made in the dashboard
 	// have no repository.
 	Repository   string   `gorm:"size:255;uniqueIndex:idx_projects_repository_set,where:repository <> ''" json:"repository"`
@@ -58,4 +62,12 @@ func (p *Project) HostPort() string {
 		host, _, _ = ParsePortMapping(DefaultPortMapping)
 	}
 	return host
+}
+
+// Path returns the project's route path, "/" when it serves the whole domain.
+func (p *Project) Path() string {
+	if p.RoutePath == "" {
+		return "/"
+	}
+	return p.RoutePath
 }

@@ -151,3 +151,27 @@ func TestCreateProject_LinkedToRepoWaitsOnItsNodeForCI(t *testing.T) {
 		t.Errorf("invalid repository: %d", w.Code)
 	}
 }
+
+func TestRoutePath_ValidatedAndUniquePerDomain(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	svc := NewProjectService(db, NewDeployer(db))
+	create := func(body string) int {
+		c, w := newTestContext(http.MethodPost, "/projects", body)
+		svc.CreateProject(c)
+		return w.Code
+	}
+	if code := create(`{"name":"web","node_id":"ok","domain":"db.example.com"}`); code != http.StatusCreated {
+		t.Fatalf("web: %d", code)
+	}
+	if code := create(`{"name":"rest","node_id":"ok","domain":"db.example.com","route_path":"/rest/v1/"}`); code != http.StatusCreated {
+		t.Fatalf("a different path on the same domain is fine: %d", code)
+	}
+	if code := create(`{"name":"rest2","node_id":"ok","domain":"db.example.com","route_path":"/rest/v1/"}`); code != http.StatusConflict {
+		t.Errorf("same domain and path twice: %d, want 409", code)
+	}
+	for _, bad := range []string{"rest/v1/", "/rest/v1", "/../", "/a b/"} {
+		if code := create(`{"name":"x","node_id":"ok","domain":"db.example.com","route_path":"` + bad + `"}`); code != http.StatusBadRequest {
+			t.Errorf("path %q: %d, want 400", bad, code)
+		}
+	}
+}

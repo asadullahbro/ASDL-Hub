@@ -109,6 +109,30 @@ func (s *ProjectService) GetProjectsByNode(c *gin.Context) {
 	c.JSON(http.StatusOK, projects)
 }
 
+// routeTakenBy returns the name of another project already serving
+// domain+path, or "" if it's free.
+func (s *ProjectService) routeTakenBy(domain, path, exceptID string) string {
+	if domain == "" {
+		return ""
+	}
+	var other models.Project
+	q := s.db.Where("domain = ? AND route_path = ?", domain, path)
+	if exceptID != "" {
+		q = q.Where("id <> ?", exceptID)
+	}
+	if q.First(&other).Error == nil {
+		return other.Name
+	}
+	return ""
+}
+
+func pathOrRoot(p string) string {
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 var repoRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
 
 func (s *ProjectService) CreateProject(c *gin.Context) {
@@ -124,6 +148,7 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		// Repository ("owner/repo") links GitHub Actions deploys from that
 		// repo to this project instead of creating a new one.
 		Repository string `json:"repository"`
+		RoutePath  string `json:"route_path"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -132,6 +157,14 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 	}
 	if err := models.ValidateProjectConfig(req.Name, req.Domain, req.Ports, req.EnvVars); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := models.ValidateRoutePath(req.RoutePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if other := s.routeTakenBy(req.Domain, req.RoutePath, ""); other != "" {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s%s is already served by %s", req.Domain, pathOrRoot(req.RoutePath), other)})
 		return
 	}
 	if req.Repository != "" {
@@ -168,6 +201,7 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 		Description:  req.Description,
 		Domain:       req.Domain,
 		Repository:   req.Repository,
+		RoutePath:    req.RoutePath,
 		NodeID:       nodeID,
 		Status:       status,
 		HealthStatus: "unknown",
@@ -208,6 +242,8 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 		Volumes      []string        `json:"volumes"`
 		Status       string          `json:"status"`
 		HealthStatus string          `json:"health_status"`
+		// nil keeps the current path; "" serves the whole domain.
+		RoutePath *string `json:"route_path"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -233,6 +269,17 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	}
 	if req.Domain != "" {
 		project.Domain = req.Domain
+	}
+	if req.RoutePath != nil {
+		if err := models.ValidateRoutePath(*req.RoutePath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		project.RoutePath = *req.RoutePath
+	}
+	if other := s.routeTakenBy(project.Domain, project.RoutePath, project.ID); other != "" {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s%s is already served by %s", project.Domain, project.Path(), other)})
+		return
 	}
 	// Picking another node moves the app there: the project keeps pointing
 	// at its current node until the new container runs (JobService.Complete).

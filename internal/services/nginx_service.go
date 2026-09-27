@@ -100,8 +100,15 @@ server {
 {{- end}}
 {{- end}}
 
-    location / {
+{{- range .Locations}}
+
+    location {{.Path}} {
+        {{- if eq .Path "/"}}
         proxy_pass http://{{.NodeIP}}:{{.Port}};
+        {{- else}}
+        # The trailing / strips {{.Path}} before the request reaches the app.
+        proxy_pass http://{{.NodeIP}}:{{.Port}}/;
+        {{- end}}
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $asdl_connection_upgrade;
@@ -110,16 +117,24 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+{{- end}}
 }
 {{end}}`
 
 var nginxTemplate = template.Must(template.New("nginx").Parse(nginxConfigTemplate))
 
+// ContainerRoute is one domain and the projects served under its paths.
 type ContainerRoute struct {
-	Domain string
+	Domain    string
+	TLS       bool
+	Locations []RouteLocation
+}
+
+// RouteLocation sends one path of a domain to a project on a node.
+type RouteLocation struct {
+	Path   string
 	NodeIP string
 	Port   string
-	TLS    bool
 }
 
 type NginxData struct {
@@ -167,15 +182,16 @@ func (s *NginxService) UpdateNginxConfig() error {
 
 func (s *NginxService) routes() ([]ContainerRoute, error) {
 	var projects []models.Project
-	if err := s.db.Where("status = ? AND domain != ?", "running", "").Find(&projects).Error; err != nil {
+	if err := s.db.Where("status = ? AND domain != ?", "running", "").Order("name").Find(&projects).Error; err != nil {
 		return nil, fmt.Errorf("failed to load projects: %w", err)
 	}
 
-	var routes []ContainerRoute
-	seen := make(map[string]bool)
+	byDomain := map[string]*ContainerRoute{}
+	seen := map[string]string{} // domain+path -> project
 	for _, project := range projects {
-		if seen[project.Domain] {
-			log.Printf("⚠️ Domain %s is used by more than one project, skipping %s", project.Domain, project.Name)
+		key := project.Domain + project.Path()
+		if other, ok := seen[key]; ok {
+			log.Printf("⚠️ %s%s is used by both %s and %s, skipping %s", project.Domain, project.Path(), other, project.Name, project.Name)
 			continue
 		}
 		var node models.Node
@@ -183,13 +199,18 @@ func (s *NginxService) routes() ([]ContainerRoute, error) {
 			log.Printf("⚠️ Node not found for project %s: %v", project.Name, err)
 			continue
 		}
-		seen[project.Domain] = true
-		routes = append(routes, ContainerRoute{
-			Domain: project.Domain,
-			NodeIP: node.VPNIP,
-			Port:   project.HostPort(),
-			TLS:    s.hasCert(project.Domain),
-		})
+		seen[key] = project.Name
+		r := byDomain[project.Domain]
+		if r == nil {
+			r = &ContainerRoute{Domain: project.Domain, TLS: s.hasCert(project.Domain)}
+			byDomain[project.Domain] = r
+		}
+		r.Locations = append(r.Locations, RouteLocation{Path: project.Path(), NodeIP: node.VPNIP, Port: project.HostPort()})
+	}
+	routes := make([]ContainerRoute, 0, len(byDomain))
+	for _, r := range byDomain {
+		sort.Slice(r.Locations, func(i, j int) bool { return r.Locations[i].Path < r.Locations[j].Path })
+		routes = append(routes, *r)
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Domain < routes[j].Domain })
 	return routes, nil

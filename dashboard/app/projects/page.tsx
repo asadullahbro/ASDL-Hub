@@ -45,6 +45,7 @@ export default function ProjectsPage() {
     name: '',
     description: '',
     domain: '',
+    route_path: '',
     node_id: '',
     image: '',
     ports: '',
@@ -125,6 +126,7 @@ export default function ProjectsPage() {
       name: project.name,
       description: project.description || '',
       domain: project.domain || '',
+      route_path: project.route_path || '',
       node_id: project.node_id,
       image: project.image || '',
       ports: project.auto_port ? '' : project.ports?.join(', ') || '',
@@ -141,6 +143,7 @@ export default function ProjectsPage() {
         name: editForm.name,
         description: editForm.description,
         domain: editForm.domain,
+        route_path: editForm.route_path.trim(),
         node_id: editForm.node_id,
         image: editForm.image,
         status: editForm.status,
@@ -241,7 +244,10 @@ export default function ProjectsPage() {
                   <div>
                     <div className="font-medium text-text-primary">{project.name}</div>
                     {project.domain && (
-                      <div className="text-xs text-accent font-mono mt-1">{project.domain}</div>
+                      <div className="text-xs text-accent font-mono mt-1">
+                        {project.domain}
+                        {project.route_path && project.route_path !== '/' ? project.route_path : ''}
+                      </div>
                     )}
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -343,6 +349,7 @@ export default function ProjectsPage() {
                 { label: 'Name', key: 'name' },
                 { label: 'Description', key: 'description' },
                 { label: 'Domain', key: 'domain' },
+                { label: 'Path (optional, e.g. /api/: serve under this path of the domain)', key: 'route_path' },
                 { label: 'Image', key: 'image' },
                 { label: 'Ports (leave empty to let the hub pick; or host:container, e.g. 8080:8000)', key: 'ports' },
               ].map(({ label, key }) => (
