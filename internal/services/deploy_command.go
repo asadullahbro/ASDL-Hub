@@ -176,6 +176,9 @@ func writePlugins(b *strings.Builder, p *models.Project, plugins []ResolvedPlugi
 		cn := shellQuote(pl.ContainerName)
 		fmt.Fprintf(b, "if [ \"$(docker inspect -f '{{index .Config.Labels \"asdl.plugin-hash\"}}' %s 2>/dev/null)\" = %s ] && [ \"$(docker inspect -f '{{.State.Running}}' %s 2>/dev/null)\" = true ]; then\n", cn, shellQuote(pl.Hash), cn)
 		fmt.Fprintf(b, "  echo 'plugin %s unchanged'\n", pl.PluginID)
+		if pl.Public {
+			fmt.Fprintf(b, "  echo \"%s%s:$(docker port %s %d/tcp | head -n1 | sed 's/.*://')\"\n", PluginPortMarker, pl.PluginID, cn, pl.Port)
+		}
 		b.WriteString("else\n")
 		fmt.Fprintf(b, "  docker pull %s\n", shellQuote(pl.Image))
 		fmt.Fprintf(b, "  docker rm -f %s >/dev/null 2>&1 || true\n", cn)
@@ -204,13 +207,56 @@ func writePlugins(b *strings.Builder, p *models.Project, plugins []ResolvedPlugi
 			env = append(env, v+"="+a)
 			args = append(args, fmt.Sprintf(`"$%s"`, v))
 		}
-		fmt.Fprintf(b, "  docker run %s %s %s\n", strings.Join(opts, " "), shellQuote(pl.Image), strings.Join(args, " "))
+		if pl.Public {
+			writePluginPublishRun(b, pl, strings.Join(opts, " "), strings.Join(args, " "))
+		} else {
+			fmt.Fprintf(b, "  docker run %s %s %s\n", strings.Join(opts, " "), shellQuote(pl.Image), strings.Join(args, " "))
+		}
 		b.WriteString("  sleep 3\n")
 		fmt.Fprintf(b, "  if [ \"$(docker inspect -f '{{.State.Running}}' %s)\" != true ]; then echo 'plugin %s exited after start:'; docker logs --tail 30 %s; exit 1; fi\n", cn, pl.PluginID, cn)
 		fmt.Fprintf(b, "  echo 'plugin %s is running'\n", pl.PluginID)
 		b.WriteString("fi\n")
 	}
 	return env
+}
+
+// PluginPortMarker prefixes the log line in which a deploy reports the node
+// port a public plugin was published on, e.g. "ASDL_PLUGIN_PORT=supabase-rest:20003".
+const PluginPortMarker = "ASDL_PLUGIN_PORT="
+
+var pluginPortRe = regexp.MustCompile(`(?m)^` + PluginPortMarker + `([a-z0-9-]+):(\d+)\s*$`)
+
+// ParsePluginPorts returns the node port each public plugin reported.
+func ParsePluginPorts(logs string) map[string]int {
+	out := map[string]int{}
+	for _, m := range pluginPortRe.FindAllStringSubmatch(logs, -1) {
+		var port int
+		fmt.Sscan(m[2], &port)
+		out[m[1]] = port
+	}
+	return out
+}
+
+// writePluginPublishRun starts a public plugin with its port published on
+// the first free node port from its previous one, like auto-port projects.
+func writePluginPublishRun(b *strings.Builder, pl ResolvedPlugin, opts, args string) {
+	start := pl.PreferredHostPort
+	if start <= 0 {
+		start = firstAutoPort
+	}
+	cn := shellQuote(pl.ContainerName)
+	fmt.Fprintf(b, "  PHPORT=%d; PTRIES=0\n", start)
+	b.WriteString("  while :; do\n")
+	fmt.Fprintf(b, "    if POUT=$(docker run %s -p \"$PHPORT:%d\" %s %s 2>&1); then break; fi\n", opts, pl.Port, shellQuote(pl.Image), args)
+	b.WriteString("    case \"$POUT\" in\n")
+	b.WriteString("      *\"port is already allocated\"*|*\"address already in use\"*)\n")
+	fmt.Fprintf(b, "        docker rm -f %s >/dev/null 2>&1 || true\n", cn)
+	fmt.Fprintf(b, "        PTRIES=$((PTRIES + 1)); if [ \"$PTRIES\" -ge %d ]; then echo \"$POUT\"; exit 1; fi\n", autoPortAttempts)
+	b.WriteString("        PHPORT=$((PHPORT + 1)) ;;\n")
+	b.WriteString("      *) echo \"$POUT\"; exit 1 ;;\n")
+	b.WriteString("    esac\n")
+	b.WriteString("  done\n")
+	fmt.Fprintf(b, "  echo \"%s%s:$PHPORT\"\n", PluginPortMarker, pl.PluginID)
 }
 
 // BuildRemoveProjectCommand removes a project's container, its plugins, its

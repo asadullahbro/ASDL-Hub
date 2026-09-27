@@ -255,6 +255,10 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 				Updates(&models.Project{Ports: []string{mapping}, AutoPort: true})
 		}
 	}
+	for pluginID, port := range ParsePluginPorts(job.Logs) {
+		s.db.Model(&models.ProjectPlugin{}).Where("project_id = ? AND plugin_id = ?", project.ID, pluginID).
+			Update("host_port", port)
+	}
 	log.Printf("✅ Deployed %s (%s) on node %s", project.Name, dep.ImageName, job.NodeID)
 
 	if previousNode != "" && previousNode != job.NodeID {

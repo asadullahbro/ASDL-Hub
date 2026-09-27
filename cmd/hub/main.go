@@ -111,6 +111,7 @@ func main() {
 	}
 	jobService.SetRoutesChangedHook(updateRoutes)
 	projectService.SetRoutesChangedHook(updateRoutes)
+	pluginService.SetRoutesChangedHook(updateRoutes)
 
 	// Migration service — handles container migrations between nodes
 	migrationService := services.NewMigrationService(database, jobService, nginxService, deployer)
@@ -547,6 +548,7 @@ echo "Agent updated successfully"
 		protected.GET("/projects/:id/plugins", pluginService.ProjectPlugins)
 		protected.POST("/projects/:id/plugins", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Attach)
 		protected.DELETE("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Detach)
+		protected.PUT("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Update)
 		// Everyone signed in sees whether an update exists; admins install it.
 		protected.GET("/system/version", updateService.Status)
 		protected.POST("/system/update", middleware.RequireRole(models.RoleAdmin), updateService.Update)

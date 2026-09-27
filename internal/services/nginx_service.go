@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"text/template"
 	"time"
@@ -182,30 +183,51 @@ func (s *NginxService) UpdateNginxConfig() error {
 
 func (s *NginxService) routes() ([]ContainerRoute, error) {
 	var projects []models.Project
-	if err := s.db.Where("status = ? AND domain != ?", "running", "").Order("name").Find(&projects).Error; err != nil {
+	if err := s.db.Where("status = ?", "running").Order("name").Find(&projects).Error; err != nil {
 		return nil, fmt.Errorf("failed to load projects: %w", err)
 	}
 
 	byDomain := map[string]*ContainerRoute{}
-	seen := map[string]string{} // domain+path -> project
-	for _, project := range projects {
-		key := project.Domain + project.Path()
+	seen := map[string]string{} // domain+path -> who serves it
+	add := func(domain, path, who, nodeIP, port string) {
+		key := domain + path
 		if other, ok := seen[key]; ok {
-			log.Printf("⚠️ %s%s is used by both %s and %s, skipping %s", project.Domain, project.Path(), other, project.Name, project.Name)
-			continue
+			log.Printf("⚠️ %s%s is used by both %s and %s, skipping %s", domain, path, other, who, who)
+			return
 		}
+		seen[key] = who
+		r := byDomain[domain]
+		if r == nil {
+			r = &ContainerRoute{Domain: domain, TLS: s.hasCert(domain)}
+			byDomain[domain] = r
+		}
+		r.Locations = append(r.Locations, RouteLocation{Path: path, NodeIP: nodeIP, Port: port})
+	}
+	nodeIPs := map[string]string{} // project ID -> its node's mesh address
+	for _, project := range projects {
 		var node models.Node
 		if err := s.db.First(&node, "id = ?", project.NodeID).Error; err != nil {
-			log.Printf("⚠️ Node not found for project %s: %v", project.Name, err)
+			if project.Domain != "" {
+				log.Printf("⚠️ Node not found for project %s: %v", project.Name, err)
+			}
 			continue
 		}
-		seen[key] = project.Name
-		r := byDomain[project.Domain]
-		if r == nil {
-			r = &ContainerRoute{Domain: project.Domain, TLS: s.hasCert(project.Domain)}
-			byDomain[project.Domain] = r
+		nodeIPs[project.ID] = node.VPNIP
+		if project.Domain != "" {
+			add(project.Domain, project.Path(), project.Name, node.VPNIP, project.HostPort())
 		}
-		r.Locations = append(r.Locations, RouteLocation{Path: project.Path(), NodeIP: node.VPNIP, Port: project.HostPort()})
+	}
+	// Public plugins are served where their project runs.
+	var plugins []models.ProjectPlugin
+	s.db.Where("domain <> ? AND host_port > ?", "", 0).Order("plugin_id").Find(&plugins)
+	for _, pl := range plugins {
+		if ip, ok := nodeIPs[pl.ProjectID]; ok {
+			path := pl.RoutePath
+			if path == "" {
+				path = "/"
+			}
+			add(pl.Domain, path, "plugin "+pl.PluginID, ip, strconv.Itoa(pl.HostPort))
+		}
 	}
 	routes := make([]ContainerRoute, 0, len(byDomain))
 	for _, r := range byDomain {

@@ -115,13 +115,31 @@ func (s *ProjectService) routeTakenBy(domain, path, exceptID string) string {
 	if domain == "" {
 		return ""
 	}
+	return routeTakenBy(s.db, domain, path, exceptID, "")
+}
+
+// routeTakenBy says who already serves domain+path, a project or a public
+// plugin, ignoring the project exceptProject and the attachment
+// exceptPlugin; "" if it's free.
+func routeTakenBy(db *gorm.DB, domain, path, exceptProject, exceptPlugin string) string {
+	if domain == "" {
+		return ""
+	}
 	var other models.Project
-	q := s.db.Where("domain = ? AND route_path = ?", domain, path)
-	if exceptID != "" {
-		q = q.Where("id <> ?", exceptID)
+	q := db.Where("domain = ? AND route_path = ?", domain, path)
+	if exceptProject != "" {
+		q = q.Where("id <> ?", exceptProject)
 	}
 	if q.First(&other).Error == nil {
 		return other.Name
+	}
+	var pl models.ProjectPlugin
+	q = db.Where("domain = ? AND route_path = ?", domain, path)
+	if exceptPlugin != "" {
+		q = q.Where("id <> ?", exceptPlugin)
+	}
+	if q.First(&pl).Error == nil {
+		return "the " + pl.PluginID + " plugin"
 	}
 	return ""
 }

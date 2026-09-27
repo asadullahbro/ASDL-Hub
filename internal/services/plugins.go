@@ -36,7 +36,10 @@ type PluginManifest struct {
 	// Provides are environment variables given to the project; they take
 	// precedence over the project's own variables with the same name.
 	Provides map[string]string `json:"provides"`
-	Builtin  bool              `json:"builtin,omitempty"`
+	// Public plugins also get a port on the node, and the Hub serves them at
+	// the domain and path chosen when they're attached (like a project).
+	Public  bool `json:"public,omitempty"`
+	Builtin bool `json:"builtin,omitempty"`
 }
 
 type PluginFile struct {
@@ -87,6 +90,35 @@ var builtinPlugins = []PluginManifest{
 	},
 }
 
+// supabaseRest serves a Postgres database the way Supabase's REST API does
+// (/rest/v1/ on a Supabase project), so Supabase clients work unchanged.
+var supabaseRest = PluginManifest{
+	ID:   "supabase-rest",
+	Name: "Supabase REST API",
+	Description: "PostgREST, the REST API Supabase serves at /rest/v1/, for a Postgres database " +
+		"(e.g. a self-hosted Supabase). Public: attach it with a domain and path like /rest/v1/.",
+	Image: "public.ecr.aws/supabase/postgrest:v14.3",
+	Port:  3000,
+	Env: map[string]string{
+		"PGRST_DB_URI":               "{{var.db_uri}}",
+		"PGRST_JWT_SECRET":           "{{var.jwt_secret}}",
+		"PGRST_DB_SCHEMAS":           "{{var.schemas}}",
+		"PGRST_DB_EXTRA_SEARCH_PATH": "public,extensions",
+		"PGRST_DB_ANON_ROLE":         "anon",
+		"PGRST_DB_MAX_ROWS":          "1000",
+	},
+	Vars: []PluginVar{
+		{Key: "db_uri", Label: "Database URL (postgresql://authenticator:…@host:port/postgres, a mesh address)", Secret: true, Required: true},
+		{Key: "jwt_secret", Label: "JWT secret (Supabase's jwt_secret)", Secret: true, Required: true},
+		{Key: "schemas", Label: "Schemas", Default: "public,graphql_public"},
+	},
+	Provides: map[string]string{"SUPABASE_REST_URL": "http://{{host}}:{{port}}"},
+	Public:   true,
+	Builtin:  true,
+}
+
+func init() { builtinPlugins = append(builtinPlugins, supabaseRest) }
+
 var (
 	pluginIDRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,29}$`)
 	pluginImageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:@-]{0,254}$`)
@@ -108,8 +140,8 @@ func (m *PluginManifest) Validate() error {
 	if m.Port < 1 || m.Port > 65535 {
 		return fmt.Errorf("port must be 1-65535")
 	}
-	if len(m.Provides) == 0 {
-		return fmt.Errorf("provides must give the project at least one variable (how it reaches the plugin)")
+	if len(m.Provides) == 0 && !m.Public {
+		return fmt.Errorf("provides must give the project at least one variable (how it reaches the plugin), unless the plugin is public")
 	}
 	vars := map[string]bool{}
 	for _, v := range m.Vars {
@@ -209,6 +241,11 @@ type ResolvedPlugin struct {
 	Env           [][2]string // sorted by name
 	Files         []PluginFile
 	Provides      [][2]string // sorted by name
+	// Public plugins publish Port on the node, preferring PreferredHostPort
+	// (the port they had before, so their route stays put).
+	Public            bool
+	Port              int
+	PreferredHostPort int
 	// Hash changes whenever anything that affects the container changes, so
 	// an unchanged plugin isn't restarted by a redeploy.
 	Hash string
@@ -238,6 +275,8 @@ func (m *PluginManifest) Resolve(project *models.Project, vars []models.EnvVar) 
 		ContainerName: project.Name + "-" + m.ID,
 		Alias:         m.ID,
 		Image:         m.Image,
+		Public:        m.Public,
+		Port:          m.Port,
 	}
 	for _, a := range m.Command {
 		r.Command = append(r.Command, sub(a))
@@ -249,7 +288,7 @@ func (m *PluginManifest) Resolve(project *models.Project, vars []models.EnvVar) 
 	r.Provides = sortedPairs(m.Provides, sub)
 
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%q\x00%q\x00%q", r.Image, r.Command, r.Env, r.Files)
+	fmt.Fprintf(h, "%s\x00%q\x00%q\x00%q\x00%v", r.Image, r.Command, r.Env, r.Files, r.Public)
 	r.Hash = hex.EncodeToString(h.Sum(nil))[:16]
 	return r
 }

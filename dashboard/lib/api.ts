@@ -110,8 +110,16 @@ export const api = {
     request<ProjectPlugin[]>(`/projects/${projectId}/plugins`),
 
   // Both redeploy the project so the change takes effect.
-  attachPlugin: (projectId: string, pluginId: string, vars: { key: string; value: string }[] = []): Promise<{ redeploying: boolean }> =>
-    request<{ redeploying: boolean }>(`/projects/${projectId}/plugins`, { method: 'POST', body: JSON.stringify({ plugin_id: pluginId, vars }) }),
+  attachPlugin: (
+    projectId: string,
+    pluginId: string,
+    vars: { key: string; value: string }[] = [],
+    route: { domain?: string; route_path?: string } = {},
+  ): Promise<{ redeploying: boolean }> =>
+    request<{ redeploying: boolean }>(`/projects/${projectId}/plugins`, {
+      method: 'POST',
+      body: JSON.stringify({ plugin_id: pluginId, vars, ...route }),
+    }),
 
   detachPlugin: (projectId: string, pluginId: string): Promise<{ redeploying: boolean }> =>
     request<{ redeploying: boolean }>(`/projects/${projectId}/plugins/${pluginId}`, { method: 'DELETE' }),

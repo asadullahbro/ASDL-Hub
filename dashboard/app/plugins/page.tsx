@@ -26,6 +26,16 @@ export default function PluginsPage() {
   const [adding, setAdding] = useState(false);
   const [manifest, setManifest] = useState(EXAMPLE);
   const [attachTo, setAttachTo] = useState<Record<string, string>>({});
+  // The attach form, for plugins that need settings or a domain.
+  const [form, setForm] = useState<{ plugin: Plugin; project: Project; vars: Record<string, string>; domain: string; path: string } | null>(null);
+
+  const needsForm = (p: Plugin) => !!p.public || (p.vars ?? []).some(v => !v.generate && !v.default);
+
+  const attach = (p: Plugin, pr: Project, vars: Record<string, string> = {}, domain = '', path = '') =>
+    run(
+      () => api.attachPlugin(pr.id, p.id, Object.entries(vars).filter(([, v]) => v !== '').map(([key, value]) => ({ key, value })), p.public ? { domain, route_path: path } : {}),
+      `${p.name} added to ${pr.name}; it's redeploying.`,
+    ).then(() => setForm(null));
 
   const load = useCallback(async () => {
     try {
@@ -120,7 +130,13 @@ export default function PluginsPage() {
                 <dt className="text-text-muted">Runs</dt>
                 <dd className="font-mono text-text-secondary break-all">{p.image}</dd>
                 <dt className="text-text-muted">Gives the app</dt>
-                <dd className="font-mono text-text-secondary">{Object.keys(p.provides).join(', ')}</dd>
+                <dd className="font-mono text-text-secondary">{Object.keys(p.provides ?? {}).join(', ') || '—'}</dd>
+                {p.public && (
+                  <>
+                    <dt className="text-text-muted">Public</dt>
+                    <dd className="text-text-secondary">served by the Hub at a domain and path you choose</dd>
+                  </>
+                )}
                 <dt className="text-text-muted">Used by</dt>
                 <dd className="text-text-secondary">{p.attached_to.length ? p.attached_to.join(', ') : 'no projects yet'}</dd>
               </dl>
@@ -141,8 +157,12 @@ export default function PluginsPage() {
                     onClick={() => {
                       const pr = projects.find(x => x.id === attachTo[p.id]);
                       if (!pr) return;
+                      if (needsForm(p)) {
+                        setForm({ plugin: p, project: pr, vars: Object.fromEntries((p.vars ?? []).map(v => [v.key, v.default ?? ''])), domain: '', path: '' });
+                        return;
+                      }
                       if (!confirm(`Add ${p.name} to ${pr.name}? ${pr.name} is redeployed with it.`)) return;
-                      run(() => api.attachPlugin(pr.id, p.id), `${p.name} added to ${pr.name}; it's redeploying.`);
+                      attach(p, pr);
                     }}
                     className="text-xs font-medium border border-border text-text-primary px-3 py-1.5 rounded hover:bg-surface-hover disabled:opacity-40"
                   >
@@ -154,6 +174,67 @@ export default function PluginsPage() {
           );
         })}
       </div>
+
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-surface border border-border rounded-lg w-full max-w-lg">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="font-medium text-text-primary">Add {form.plugin.name} to {form.project.name}</h2>
+              <button onClick={() => setForm(null)} className="text-text-muted hover:text-text-primary">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              {(form.plugin.vars ?? []).map(v => (
+                <div key={v.key}>
+                  <label className="block text-xs text-text-muted mb-1">
+                    {v.label}
+                    {v.generate ? ' (leave empty to generate)' : v.required ? '' : ' (optional)'}
+                  </label>
+                  <input
+                    type={v.secret ? 'password' : 'text'}
+                    value={form.vars[v.key] ?? ''}
+                    onChange={e => setForm(f => f && { ...f, vars: { ...f.vars, [v.key]: e.target.value } })}
+                    className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent"
+                  />
+                </div>
+              ))}
+              {form.plugin.public && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Domain</label>
+                    <input
+                      value={form.domain}
+                      placeholder="db.example.com"
+                      onChange={e => setForm(f => f && { ...f, domain: e.target.value })}
+                      className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Path (optional)</label>
+                    <input
+                      value={form.path}
+                      placeholder="/rest/v1/"
+                      onChange={e => setForm(f => f && { ...f, path: e.target.value })}
+                      className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-text-muted">{form.project.name} is redeployed with the plugin. Secret values are stored encrypted.</p>
+            </div>
+            <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
+              <button onClick={() => setForm(null)} className="text-sm text-text-muted hover:text-text-primary px-3 py-1.5">Cancel</button>
+              <button
+                onClick={() => attach(form.plugin, form.project, form.vars, form.domain.trim(), form.path.trim())}
+                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90"
+              >
+                Add plugin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {adding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">

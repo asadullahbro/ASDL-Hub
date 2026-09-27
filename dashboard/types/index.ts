@@ -348,6 +348,8 @@ export interface Plugin {
   files?: { path: string; content: string }[];
   vars?: PluginVar[];
   provides: Record<string, string>;
+  // Public plugins are served by the Hub at a domain+path chosen on attach.
+  public?: boolean;
   builtin?: boolean;
   attached_to: string[];
 }
@@ -357,5 +359,8 @@ export interface ProjectPlugin {
   project_id: string;
   plugin_id: string;
   vars: { key: string; value: string }[];
+  domain: string;
+  route_path: string;
+  host_port: number;
   created_at: string;
 }

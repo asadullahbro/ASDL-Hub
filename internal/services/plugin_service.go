@@ -67,7 +67,9 @@ func resolvePlugins(db *gorm.DB, project *models.Project) []ResolvedPlugin {
 			log.Printf("⚠️ %s has plugin %s attached, but no such plugin exists any more; skipping it", project.Name, a.PluginID)
 			continue
 		}
-		out = append(out, m.Resolve(project, a.Vars))
+		r := m.Resolve(project, a.Vars)
+		r.PreferredHostPort = a.HostPort
+		out = append(out, r)
 	}
 	return out
 }
@@ -77,10 +79,35 @@ type PluginService struct {
 	db *gorm.DB
 	// redeploy restarts a project with its current settings (and plugins).
 	redeploy func(*models.Project) error
+	// routesChanged regenerates the Hub's routes (public plugins' domains).
+	routesChanged func()
 }
 
 func NewPluginService(db *gorm.DB, redeploy func(*models.Project) error) *PluginService {
 	return &PluginService{db: db, redeploy: redeploy}
+}
+
+func (s *PluginService) SetRoutesChangedHook(fn func()) { s.routesChanged = fn }
+
+// checkRoute validates a public plugin's domain and path and that nobody
+// else serves them.
+func (s *PluginService) checkRoute(m PluginManifest, domain, path, exceptPlugin string) error {
+	if !m.Public {
+		if domain != "" || path != "" {
+			return fmt.Errorf("%s isn't a public plugin, so it can't have a domain", m.Name)
+		}
+		return nil
+	}
+	if err := models.ValidateProjectConfig("", domain, nil, nil); err != nil {
+		return err
+	}
+	if err := models.ValidateRoutePath(path); err != nil {
+		return err
+	}
+	if other := routeTakenBy(s.db, domain, path, "", exceptPlugin); other != "" {
+		return fmt.Errorf("%s%s is already served by %s", domain, pathOrRoot(path), other)
+	}
+	return nil
 }
 
 type pluginInfo struct {
@@ -195,8 +222,10 @@ func (s *PluginService) Attach(c *gin.Context) {
 		return
 	}
 	var req struct {
-		PluginID string          `json:"plugin_id"`
-		Vars     []models.EnvVar `json:"vars"`
+		PluginID  string          `json:"plugin_id"`
+		Vars      []models.EnvVar `json:"vars"`
+		Domain    string          `json:"domain"`
+		RoutePath string          `json:"route_path"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -217,13 +246,98 @@ func (s *PluginService) Attach(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	pp := models.ProjectPlugin{ID: uuid.New().String(), ProjectID: project.ID, PluginID: m.ID, Vars: vars, CreatedAt: time.Now()}
+	if err := s.checkRoute(m, req.Domain, req.RoutePath, ""); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pp := models.ProjectPlugin{ID: uuid.New().String(), ProjectID: project.ID, PluginID: m.ID, Vars: vars,
+		Domain: req.Domain, RoutePath: req.RoutePath, CreatedAt: time.Now()}
 	if err := s.db.Create(&pp).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	log.Printf("🧩 Attached plugin %s to %s", m.ID, project.Name)
 	c.JSON(http.StatusCreated, gin.H{"plugin": pp, "redeploying": s.redeployNow(&project)})
+}
+
+// Update handles PUT /projects/:id/plugins/:plugin {"vars", "domain",
+// "route_path"}: masked (unchanged) values keep their stored value. Changed
+// settings redeploy the project; a changed route only updates the routes.
+func (s *PluginService) Update(c *gin.Context) {
+	var project models.Project
+	if err := s.db.First(&project, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return
+	}
+	var pp models.ProjectPlugin
+	if err := s.db.First(&pp, "project_id = ? AND plugin_id = ?", project.ID, c.Param("plugin")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": project.Name + " doesn't have that plugin"})
+		return
+	}
+	m, ok := PluginCatalog(s.db)[pp.PluginID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no plugin " + pp.PluginID})
+		return
+	}
+	var req struct {
+		Vars      []models.EnvVar `json:"vars"`
+		Domain    *string         `json:"domain"`
+		RoutePath *string         `json:"route_path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	varsChanged := false
+	if req.Vars != nil {
+		merged := models.MergeMasked(req.Vars, pp.Vars)
+		// Keep settings that weren't sent; take the rest from the request.
+		byKey := map[string]string{}
+		for _, v := range pp.Vars {
+			byKey[v.Key] = v.Value
+		}
+		for _, v := range merged {
+			if byKey[v.Key] != v.Value {
+				varsChanged = true
+			}
+			byKey[v.Key] = v.Value
+		}
+		given := make([]models.EnvVar, 0, len(byKey))
+		for k, v := range byKey {
+			given = append(given, models.EnvVar{Key: k, Value: v})
+		}
+		vars, err := m.FillVars(given)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		pp.Vars = vars
+	}
+	routeChanged := false
+	if req.Domain != nil && *req.Domain != pp.Domain {
+		pp.Domain, routeChanged = *req.Domain, true
+	}
+	if req.RoutePath != nil && *req.RoutePath != pp.RoutePath {
+		pp.RoutePath, routeChanged = *req.RoutePath, true
+	}
+	if routeChanged {
+		if err := s.checkRoute(m, pp.Domain, pp.RoutePath, pp.ID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := s.db.Save(&pp).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	redeploying := false
+	if varsChanged {
+		redeploying = s.redeployNow(&project)
+	}
+	if routeChanged && s.routesChanged != nil {
+		go s.routesChanged()
+	}
+	c.JSON(http.StatusOK, gin.H{"plugin": pp, "redeploying": redeploying})
 }
 
 // Detach handles DELETE /projects/:id/plugins/:plugin. The project is
@@ -240,6 +354,9 @@ func (s *PluginService) Detach(c *gin.Context) {
 		return
 	}
 	log.Printf("🧩 Removed plugin %s from %s", c.Param("plugin"), project.Name)
+	if s.routesChanged != nil {
+		go s.routesChanged()
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "plugin removed", "redeploying": s.redeployNow(&project)})
 }
 
