@@ -1,28 +1,31 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { BellRing, Hash, Mail, MessageCircle, Pencil, Send, Slack, Trash2, Webhook, X } from 'lucide-react';
+import { Hash, Mail, Pencil, Send, Slack, Trash2, Webhook, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { NotificationChannel, NotificationEvent, NotificationType, Project } from '@/types';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { BRAND_PATHS, BrandIcon } from './BrandIcons';
 
-const LOOK: Record<string, { icon: LucideIcon; color: string }> = {
-  discord: { icon: MessageCircle, color: '#5865F2' },
+// Brand marks where the service has one; generic icons otherwise.
+const LOOK: Record<string, { icon?: LucideIcon; brand?: string; color: string }> = {
+  discord: { brand: BRAND_PATHS.discord, color: '#5865F2' },
   slack: { icon: Slack, color: '#4A154B' },
-  telegram: { icon: Send, color: '#26A5E4' },
-  ntfy: { icon: BellRing, color: '#338574' },
+  telegram: { brand: BRAND_PATHS.telegram, color: '#26A5E4' },
+  ntfy: { brand: BRAND_PATHS.ntfy, color: '#317F6F' },
   email: { icon: Mail, color: '#f29a00' },
   webhook: { icon: Webhook, color: '#52525b' },
 };
 
 function TypeIcon({ type, size = 'md' }: { type: string; size?: 'md' | 'lg' }) {
   const look = LOOK[type] ?? { icon: Hash, color: '#52525b' };
-  const Icon = look.icon;
+  const Icon = look.icon ?? Hash;
   const box = size === 'lg' ? 'h-9 w-9' : 'h-7 w-7';
+  const glyph = size === 'lg' ? 'h-5 w-5' : 'h-4 w-4';
   return (
     <span className={`${box} flex-shrink-0 rounded-md flex items-center justify-center text-white`} style={{ background: look.color }}>
-      <Icon className={size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'} />
+      {look.brand ? <BrandIcon path={look.brand} className={glyph} /> : <Icon className={glyph} />}
     </span>
   );
 }
