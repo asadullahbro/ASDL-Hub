@@ -43,6 +43,7 @@ machine automatically if its own goes down.
 | **Notifications** | Hear about failed deploys, apps going down and moving, nodes going offline and new releases on Discord, Slack, Telegram, ntfy, email or a signed webhook. |
 | **Maintenance mode** | Before working on a machine, one click moves its apps to other nodes with no downtime and keeps new ones off it. |
 | **One dashboard** | Nodes with their containers, logs and connection status, apps, jobs with full logs, health, and a web terminal to each machine. |
+| **Command line** | `asdl-hub status`, `apps`, `logs`, `deploy`, `move`, `maintenance`… on the Hub's server or any machine you log in from, and `asdl-agent` on each node. |
 | **One-click updates** | The dashboard tells you when a new release is out and installs it for you, verified against the release checksums. |
 
 ## How it works
@@ -85,7 +86,7 @@ is out, or run the same command again; your data and settings are kept. To insta
 a specific version, put it before the project name:
 
 ```bash
-curl -fsSL https://get.asdl.website/v0.9.0/asdl-hub | sudo bash
+curl -fsSL https://get.asdl.website/v0.10.0/asdl-hub | sudo bash
 ```
 
 ## Get started
@@ -94,7 +95,16 @@ curl -fsSL https://get.asdl.website/v0.9.0/asdl-hub | sudo bash
 2. **[Deploy from GitHub](https://docs.asdl.website/hub/deploy-from-github/)** — add a workflow to your repo.
 3. **[Give it a domain](https://docs.asdl.website/hub/domains-and-https/)** — point DNS at the Hub and set the domain on the app.
 
-Everything else is in the **[documentation](https://docs.asdl.website/hub/overview/)**.
+From a terminal on the Hub's server:
+
+```bash
+sudo asdl-hub status        # nodes, apps, today's jobs
+sudo asdl-hub logs <app>
+sudo asdl-hub move <app> <node>
+```
+
+See the **[command line docs](https://docs.asdl.website/hub/cli/)**. Everything else is in the
+**[documentation](https://docs.asdl.website/hub/overview/)**.
 
 ## Building from source
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/asdl/hub/internal/api/handlers"
 	"github.com/asdl/hub/internal/api/middleware"
+	"github.com/asdl/hub/internal/cli"
 	"github.com/asdl/hub/internal/db"
 	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
@@ -40,6 +41,12 @@ type Config struct {
 var Version = "dev"
 
 func main() {
+	// asdl-hub <command> is the command line; no arguments (as the service
+	// runs it) or "serve" starts the server.
+	if cli.IsCommand(os.Args[1:]) {
+		os.Exit(cli.Run(os.Args[1:], Version))
+	}
+
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️  No .env file found, using environment variables")
@@ -78,6 +85,8 @@ func main() {
 	}
 	models.EncryptLegacySecrets(database)
 	authService := services.NewAuthService(database, jwtSecret)
+	// sudo asdl-hub <command> on this server uses this token.
+	authService.StartCLIToken(cli.LocalTokenFile)
 	authHandlers := handlers.NewAuthHandlers(authService)
 
 	// github handler

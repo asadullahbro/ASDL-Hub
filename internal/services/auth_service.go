@@ -3,6 +3,8 @@ package services
 
 import (
 	"errors"
+	"log"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -92,4 +94,38 @@ func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
 	}
 
 	return &user, nil
+}
+
+// StartCLIToken keeps an admin token for the local command line in path
+// (relative to the working directory, readable only by the Hub's user, so
+// root on this server can run asdl-hub commands without logging in). It is
+// renewed daily and valid for a week.
+func (s *AuthService) StartCLIToken(path string) {
+	write := func() {
+		var admin models.User
+		if err := s.db.Where("role = ?", models.RoleAdmin).Order("created_at").First(&admin).Error; err != nil {
+			return
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id": admin.ID,
+			"role":    admin.Role,
+			"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
+		})
+		signed, err := token.SignedString([]byte(s.jwtSecret))
+		if err != nil {
+			return
+		}
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(signed+"\n"), 0o600); err != nil {
+			log.Printf("⚠️ Could not write the command line's token: %v", err)
+			return
+		}
+		_ = os.Rename(tmp, path)
+	}
+	go func() {
+		for {
+			write()
+			time.Sleep(24 * time.Hour)
+		}
+	}()
 }

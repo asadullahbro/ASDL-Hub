@@ -631,7 +631,7 @@ User=$RUN_USER
 Group=$RUN_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$INSTALL_DIR/bin/asdl-hub
+ExecStart=$INSTALL_DIR/bin/asdl-hub serve
 Restart=always
 RestartSec=5
 NoNewPrivileges=false
@@ -645,6 +645,8 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable "$SERVICE_NAME"
+    # The same binary is the command line: sudo asdl-hub status, apps, logs...
+    ln -sfn "$INSTALL_DIR/bin/asdl-hub" /usr/local/bin/asdl-hub
     ok "Systemd service configured."
 }
 
@@ -704,6 +706,9 @@ summary() {
     echo "    → Hetzner:      Firewall in Cloud Console"
     echo
     warn "Keep the generated admin password somewhere safe."
+    echo
+    echo "  Command line: run 'sudo asdl-hub status' (or 'asdl-hub help') here,"
+    echo "  or 'asdl-hub login <hub url>' on another machine with asdl-hub installed."
     echo
 }
 
