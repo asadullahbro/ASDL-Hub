@@ -86,7 +86,8 @@ func (c *client) findApp(name string) (*project, error) {
 		if list[i].Name == name || list[i].ID == name {
 			return &list[i], nil
 		}
-		if len(name) >= 4 && strings.HasPrefix(list[i].ID, name) {
+		if (len(name) >= 3 && strings.HasPrefix(strings.ToLower(list[i].Name), strings.ToLower(name))) ||
+			(len(name) >= 4 && strings.HasPrefix(list[i].ID, name)) {
 			prefix = append(prefix, list[i])
 		}
 	}
@@ -111,7 +112,9 @@ func (c *client) findNode(name string) (*node, error) {
 		if n.Hostname == name || n.ID == name || n.VPNIP == name {
 			return &list[i], nil
 		}
-		if strings.EqualFold(n.Hostname, name) || strings.HasPrefix(strings.ToLower(n.Hostname), strings.ToLower(name)+".") ||
+		// Any unambiguous start of the hostname or ID: "macbook" for
+		// "MacBook-Pro.local".
+		if (len(name) >= 3 && strings.HasPrefix(strings.ToLower(n.Hostname), strings.ToLower(name))) ||
 			(len(name) >= 4 && strings.HasPrefix(n.ID, name)) {
 			loose = append(loose, n)
 		}

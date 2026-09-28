@@ -646,7 +646,10 @@ EOF
     systemctl daemon-reload
     systemctl enable "$SERVICE_NAME"
     # The same binary is the command line: sudo asdl-hub status, apps, logs...
-    ln -sfn "$INSTALL_DIR/bin/asdl-hub" /usr/local/bin/asdl-hub
+    # A copy (not a link into $INSTALL_DIR, which only the Hub's user can
+    # open), so everyone can run it and gets told to use sudo on this server.
+    rm -f /usr/local/bin/asdl-hub
+    install -m 755 "$INSTALL_DIR/bin/asdl-hub" /usr/local/bin/asdl-hub
     ok "Systemd service configured."
 }
 
