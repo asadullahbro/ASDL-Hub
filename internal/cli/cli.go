@@ -62,7 +62,9 @@ type env struct {
 func IsCommand(args []string) bool {
 	if len(args) == 0 {
 		// Services start the Hub without arguments; people get help.
-		return term.IsTerminal(int(os.Stdin.Fd())) && os.Getenv("INVOCATION_ID") == ""
+		// Services start with no terminal on stdin. (INVOCATION_ID can't
+		// tell them apart: desktops start terminals under systemd too.)
+		return term.IsTerminal(int(os.Stdin.Fd()))
 	}
 	return args[0] != "serve"
 }
