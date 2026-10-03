@@ -1,12 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Hash, Mail, Pencil, Send, Slack, Trash2, Webhook, X } from 'lucide-react';
+import { Hash, Mail, Pencil, Plus, Send, Slack, Trash2, Webhook } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { NotificationChannel, NotificationEvent, NotificationType, Project } from '@/types';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { BRAND_PATHS, BrandIcon } from './BrandIcons';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState } from '@/components/ui/Card';
+import { Field, Modal, inputClass } from '@/components/ui/Modal';
+import { Choice } from '@/components/ui/Tabs';
 
 // Brand marks where the service has one; generic icons otherwise.
 const LOOK: Record<string, { icon?: LucideIcon; brand?: string; color: string }> = {
@@ -191,103 +196,75 @@ export function NotificationPlugins({ reloadKey = 0 }: { reloadKey?: number }) {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-text-muted max-w-2xl">
-        Get told when a deploy fails, an app goes down and moves to another node, a node goes offline or a Hub update is
-        out. Add a notification plugin as many times as you like; each channel picks its own events and, optionally,
-        apps.
-      </p>
-
       {error && <div className="text-sm text-status-red break-words">{error}</div>}
       {notice && <div className="text-sm text-status-green">{notice}</div>}
 
       <section className="space-y-3">
-        <h2 className="text-xs uppercase tracking-widest text-text-muted">Your channels</h2>
-        {channels.length === 0 && (
-          <div className="bg-surface border border-border rounded-lg p-5 text-sm text-text-muted">
-            No channels yet. Add one below; it gets a test message right away.
+        <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-secondary">Your channels</h2>
+        {channels.length === 0 ? (
+          <div className="bg-surface border border-border rounded-lg">
+            <EmptyState>No channels yet. Add a notification plugin below; it sends a test message right away.</EmptyState>
           </div>
-        )}
-        {channels.map(ch => (
-          <div key={ch.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col md:flex-row md:items-start gap-4">
-            <div className="flex items-start gap-3 flex-1 min-w-0">
-              <TypeIcon type={ch.type} size="lg" />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-semibold text-text-primary">{ch.name}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-hover text-text-muted">
-                    {typeOf(ch.type)?.name ?? ch.type}
-                  </span>
-                  {!ch.enabled && <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-hover text-text-muted">paused</span>}
+        ) : (
+          channels.map(ch => (
+            <div key={ch.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col md:flex-row md:items-start gap-4">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <TypeIcon type={ch.type} size="lg" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-text-primary">{ch.name}</span>
+                    <Badge>{typeOf(ch.type)?.name ?? ch.type}</Badge>
+                    {!ch.enabled && <Badge tone="warning">paused</Badge>}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {ch.events.length === 0 && <span className="text-xs text-text-secondary">No events chosen</span>}
+                    {ch.events.map(e => (
+                      <Badge key={e}>{eventLabel(e)}</Badge>
+                    ))}
+                  </div>
+                  <div className="text-xs text-text-secondary mt-2">
+                    {ch.projects.length ? `Apps: ${ch.projects.map(projectName).join(', ')}` : 'All apps'} · last sent {ago(ch.last_sent_at)}
+                  </div>
+                  {ch.last_error && <div className="text-xs text-status-red mt-1 break-words">Last attempt failed: {ch.last_error}</div>}
                 </div>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {ch.events.length === 0 && <span className="text-xs text-text-muted">No events chosen</span>}
-                  {ch.events.map(e => (
-                    <span key={e} className="px-1.5 py-0.5 rounded text-[10px] border border-border text-text-secondary">
-                      {eventLabel(e)}
-                    </span>
-                  ))}
-                </div>
-                <div className="text-xs text-text-muted mt-2">
-                  {ch.projects.length ? `Apps: ${ch.projects.map(projectName).join(', ')}` : 'All apps'} · last sent {ago(ch.last_sent_at)}
-                </div>
-                {ch.last_error && <div className="text-xs text-status-red mt-1 break-words">Last attempt failed: {ch.last_error}</div>}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <label className="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer mr-2">
+                  <input type="checkbox" checked={ch.enabled} onChange={() => toggle(ch)} className="accent-[#f59e0b]" />
+                  On
+                </label>
+                <Button icon={Send} loading={busy === ch.id} onClick={() => test(ch)}>Send test</Button>
+                <Button variant="ghost" icon={Pencil} aria-label="Edit" onClick={() => openEdit(ch)} />
+                <Button variant="ghost" icon={Trash2} aria-label="Remove" className="hover:text-status-red" onClick={() => remove(ch)} />
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer mr-1">
-                <input type="checkbox" checked={ch.enabled} onChange={() => toggle(ch)} className="accent-[#f29a00]" />
-                On
-              </label>
-              <button
-                onClick={() => test(ch)}
-                disabled={busy === ch.id}
-                className="flex items-center gap-1.5 text-xs font-medium border border-border text-text-primary px-2.5 py-1.5 rounded hover:bg-surface-hover disabled:opacity-40"
-              >
-                <Send className="h-3.5 w-3.5" /> {busy === ch.id ? 'Sending…' : 'Send test'}
-              </button>
-              <button title="Edit" onClick={() => openEdit(ch)} className="p-1.5 text-text-muted hover:text-text-primary">
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button title="Remove" onClick={() => remove(ch)} className="p-1.5 text-text-muted hover:text-status-red">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xs uppercase tracking-widest text-text-muted">Notification plugins</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-secondary">Notification plugins</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {types.map(t => {
             const used = channels.filter(c => c.type === t.id).length;
             return (
-              <div key={t.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col gap-3">
+              <div key={t.id} className="bg-surface border border-border rounded-lg p-4 flex flex-col gap-4">
                 <div className="flex gap-3 flex-1">
                   <TypeIcon type={t.id} size="lg" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-text-primary flex items-center gap-2">
                       {t.name}
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-hover text-text-muted">
-                        {t.builtin ? 'built-in' : 'custom'}
-                      </span>
+                      <Badge>{t.builtin ? 'built-in' : 'custom'}</Badge>
                     </div>
-                    <p className="text-xs text-text-muted mt-1">{t.description}</p>
+                    <p className="text-xs text-text-secondary mt-1">{t.description}</p>
                   </div>
                   {!t.builtin && (
-                    <button title="Remove this plugin" onClick={() => removeType(t)} className="self-start text-text-muted hover:text-status-red">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <Button variant="ghost" icon={Trash2} aria-label="Remove this plugin" className="self-start hover:text-status-red" onClick={() => removeType(t)} />
                   )}
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-muted">{used ? `${used} channel${used > 1 ? 's' : ''}` : 'Not added yet'}</span>
-                  <button
-                    onClick={() => openNew(t)}
-                    className="text-xs font-medium border border-border text-text-primary px-3 py-1.5 rounded hover:bg-surface-hover"
-                  >
-                    Add
-                  </button>
+                  <span className="text-xs text-text-secondary">{used ? `${used} channel${used > 1 ? 's' : ''}` : 'Not added yet'}</span>
+                  <Button icon={Plus} onClick={() => openNew(t)}>Add</Button>
                 </div>
               </div>
             );
@@ -296,109 +273,73 @@ export function NotificationPlugins({ reloadKey = 0 }: { reloadKey?: number }) {
       </section>
 
       {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-surface border border-border rounded-lg w-full max-w-xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h2 className="font-medium text-text-primary flex items-center gap-2">
-                <TypeIcon type={form.type.id} />
-                {form.id ? `Edit ${form.name}` : `Add ${form.type.name}`}
-              </h2>
-              <button onClick={() => setForm(null)} className="text-text-muted hover:text-text-primary">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4 overflow-y-auto">
-              <p className="text-xs text-text-muted">{form.type.description}</p>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Name</label>
-                <input
-                  value={form.name}
-                  placeholder={form.type.name}
-                  onChange={e => setForm(f => f && { ...f, name: e.target.value })}
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                />
-              </div>
-              {form.type.fields.map(f => (
-                <div key={f.key}>
-                  <label className="block text-xs text-text-muted mb-1">{f.label}</label>
+        <Modal
+          title={<><TypeIcon type={form.type.id} /> {form.id ? `Edit ${form.name}` : `Add ${form.type.name}`}</>}
+          onClose={() => setForm(null)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setForm(null)}>Cancel</Button>
+              <Button variant="primary" onClick={save}>{form.id ? 'Save' : 'Add and send a test'}</Button>
+            </>
+          }
+        >
+          <p className="text-xs text-text-secondary">{form.type.description}</p>
+          <Field label="Name">
+            <input value={form.name} placeholder={form.type.name} onChange={e => setForm(f => f && { ...f, name: e.target.value })} className={inputClass} />
+          </Field>
+          {form.type.fields.map(f => (
+            <Field key={f.key} label={f.label} help={f.help}>
+              <input
+                type={f.secret ? 'password' : 'text'}
+                value={form.config[f.key] ?? ''}
+                placeholder={f.placeholder}
+                autoComplete="off"
+                onFocus={e => f.secret && e.target.value === '********' && e.target.select()}
+                onChange={e => setForm(x => x && { ...x, config: { ...x.config, [f.key]: e.target.value } })}
+                className={`${inputClass} font-mono`}
+              />
+            </Field>
+          ))}
+          <div>
+            <div className="text-xs text-text-secondary mb-2">Send these events</div>
+            <div className="space-y-2">
+              {events.map(ev => (
+                <label key={ev.id} className="flex items-start gap-2 cursor-pointer">
                   <input
-                    type={f.secret ? 'password' : 'text'}
-                    value={form.config[f.key] ?? ''}
-                    placeholder={f.placeholder}
-                    autoComplete="off"
-                    onFocus={e => f.secret && e.target.value === '********' && e.target.select()}
-                    onChange={e => setForm(x => x && { ...x, config: { ...x.config, [f.key]: e.target.value } })}
-                    className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent"
+                    type="checkbox"
+                    className="mt-0.5 accent-[#f59e0b]"
+                    checked={form.events.includes(ev.id)}
+                    onChange={e =>
+                      setForm(f => f && { ...f, events: e.target.checked ? [...f.events, ev.id] : f.events.filter(x => x !== ev.id) })
+                    }
                   />
-                  {f.help && <p className="text-[11px] text-text-muted mt-1">{f.help}</p>}
-                </div>
+                  <span>
+                    <span className="text-sm text-text-primary">{ev.label}</span>
+                    <span className="block text-[11px] text-text-secondary">{ev.description}</span>
+                  </span>
+                </label>
               ))}
-
-              <div>
-                <div className="text-xs text-text-muted mb-2">Send these events</div>
-                <div className="space-y-2">
-                  {events.map(ev => (
-                    <label key={ev.id} className="flex items-start gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5 accent-[#f29a00]"
-                        checked={form.events.includes(ev.id)}
-                        onChange={e =>
-                          setForm(f => f && {
-                            ...f,
-                            events: e.target.checked ? [...f.events, ev.id] : f.events.filter(x => x !== ev.id),
-                          })
-                        }
-                      />
-                      <span>
-                        <span className="text-sm text-text-primary">{ev.label}</span>
-                        <span className="block text-[11px] text-text-muted">{ev.description}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {projects.length > 0 && (
-                <div>
-                  <div className="text-xs text-text-muted mb-2">App events for</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      onClick={() => setForm(f => f && { ...f, projects: [] })}
-                      className={`px-2 py-1 rounded text-xs border ${form.projects.length === 0 ? 'border-accent text-text-primary' : 'border-border text-text-muted'}`}
-                    >
-                      All apps
-                    </button>
-                    {projects.map(p => {
-                      const on = form.projects.includes(p.id);
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() =>
-                            setForm(f => f && { ...f, projects: on ? f.projects.filter(x => x !== p.id) : [...f.projects, p.id] })
-                          }
-                          className={`px-2 py-1 rounded text-xs border ${on ? 'border-accent text-text-primary' : 'border-border text-text-muted'}`}
-                        >
-                          {p.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[11px] text-text-muted mt-1">Node and Hub events are always sent.</p>
-                </div>
-              )}
-              {formError && <div className="text-sm text-status-red break-words">{formError}</div>}
-            </div>
-            <div className="flex justify-end gap-3 px-5 py-3.5 border-t border-border">
-              <button onClick={() => setForm(null)} className="text-sm text-text-muted hover:text-text-primary px-3 py-1.5">
-                Cancel
-              </button>
-              <button onClick={save} className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90">
-                {form.id ? 'Save' : 'Add and send a test'}
-              </button>
             </div>
           </div>
-        </div>
+          {projects.length > 0 && (
+            <div>
+              <div className="text-xs text-text-secondary mb-2">App events for</div>
+              <div className="flex flex-wrap gap-1.5">
+                <Choice selected={form.projects.length === 0} onClick={() => setForm(f => f && { ...f, projects: [] })}>All apps</Choice>
+                {projects.map(p => {
+                  const on = form.projects.includes(p.id);
+                  return (
+                    <Choice key={p.id} selected={on} onClick={() => setForm(f => f && { ...f, projects: on ? f.projects.filter(x => x !== p.id) : [...f.projects, p.id] })}>
+                      {p.name}
+                    </Choice>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-text-muted mt-1">Node and Hub events are always sent.</p>
+            </div>
+          )}
+          {formError && <div className="text-sm text-status-red break-words">{formError}</div>}
+        </Modal>
       )}
     </div>
   );

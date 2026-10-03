@@ -1,5 +1,7 @@
 'use client';
 
+import { ArrowUpCircle, CheckCircle2, X } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, SystemVersion } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -101,7 +103,8 @@ export function UpdateBanner() {
   if (phase.kind === 'done') {
     return (
       <Bar tone="green">
-        <span>✓ Updated to <b className="font-mono">{phase.version}</b>. Reloading…</span>
+        <CheckCircle2 className="h-4 w-4 text-status-green flex-shrink-0" />
+        <span>Updated to <b className="font-mono">{phase.version}</b>. Reloading…</span>
       </Bar>
     );
   }
@@ -113,7 +116,7 @@ export function UpdateBanner() {
   const isAdmin = user?.role === 'admin';
   return (
     <Bar tone="accent">
-      <span className="text-base leading-none">⬆</span>
+      <ArrowUpCircle className="h-4 w-4 text-accent flex-shrink-0" />
       <span className="flex-1 min-w-0">
         <b>ASDL Hub <span className="font-mono">{info.latest}</span> is available</b>
         <span className="text-text-secondary"> — you&apos;re on <span className="font-mono">{info.current}</span>. </span>
@@ -132,12 +135,7 @@ export function UpdateBanner() {
         {!isAdmin && <span className="text-text-secondary"> Ask an admin to update.</span>}
       </span>
       {isAdmin && info.can_update && (
-        <button
-          onClick={startUpdate}
-          className="flex-shrink-0 text-xs font-medium bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity"
-        >
-          Update now
-        </button>
+        <Button variant="primary" onClick={startUpdate}>Update now</Button>
       )}
       <button
         onClick={() => {
@@ -148,9 +146,9 @@ export function UpdateBanner() {
         }}
         aria-label="Dismiss until the next release"
         title="Dismiss until the next release"
-        className="flex-shrink-0 text-text-secondary hover:text-text-primary px-1"
+        className="flex-shrink-0 text-text-secondary hover:text-text-primary p-1"
       >
-        ×
+        <X className="h-4 w-4" />
       </button>
     </Bar>
   );

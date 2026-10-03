@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -99,7 +100,11 @@ func (h *EnrollmentHandlers) Rollback(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "node_id required"})
 		return
 	}
-	if err := h.enrollment.Rollback(nodeID); err != nil {
+	if err := h.enrollment.Rollback(nodeID, c.GetHeader("X-Enrollment-Token")); err != nil {
+		if errors.Is(err, services.ErrRollbackDenied) {
+			c.JSON(403, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

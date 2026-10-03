@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -464,4 +465,45 @@ func (s *NodeService) StartOfflineSweeper() {
 			}
 		}
 	}()
+}
+
+// Remove handles DELETE /nodes/:id: forgets a node for good. Its WireGuard
+// peer is removed (so an agent still running there is cut off), and so are
+// its keys, history and waiting jobs. A node that still runs apps can't be
+// removed; move them first.
+func (s *NodeService) Remove(c *gin.Context, removePeer func(publicKey string) error) {
+	var node models.Node
+	if err := s.db.First(&node, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+	var apps []string
+	s.db.Model(&models.Project{}).Where("node_id = ?", node.ID).Order("name").Pluck("name", &apps)
+	if len(apps) > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("%s still runs %s; move them to another node first", node.Hostname, strings.Join(apps, ", ")),
+			"apps":  apps,
+		})
+		return
+	}
+
+	var peer models.WireGuardPeer
+	if err := s.db.Where("node_id = ?", node.ID).First(&peer).Error; err == nil {
+		if removePeer != nil {
+			if err := removePeer(peer.PublicKey); err != nil {
+				log.Printf("⚠️ Removing node %s: WireGuard peer: %v", node.Hostname, err)
+			}
+		}
+		s.db.Delete(&peer)
+	}
+	s.db.Delete(&models.NodeSSHKey{}, "node_id = ?", node.ID)
+	s.db.Delete(&models.Heartbeat{}, "node_id = ?", node.ID)
+	s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).Delete(&models.Job{})
+	s.db.Delete(&models.Setting{}, "key = ? AND value = ?", "master_node_id", node.ID)
+	if err := s.db.Delete(&node).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("🗑️ Node %s (%s) removed", node.Hostname, node.VPNIP)
+	c.JSON(http.StatusOK, gin.H{"removed": node.Hostname})
 }

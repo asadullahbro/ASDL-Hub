@@ -231,7 +231,20 @@ func (s *EnrollmentService) Decrypt(ciphertext string) (string, error) {
 	return string(plain), nil
 }
 
-func (s *EnrollmentService) Rollback(nodeID string) error {
+// rollbackWindow is how long after enrolling the installer may undo it.
+const rollbackWindow = time.Hour
+
+// Rollback undoes an enrollment whose install failed. Only the installer that
+// enrolled the node can do it: it must present the enrollment token it used,
+// within an hour of enrolling.
+func (s *EnrollmentService) Rollback(nodeID, enrollToken string) error {
+	var tok models.EnrollmentToken
+	if enrollToken == "" || s.db.Where("token = ? AND used_by = ?", enrollToken, nodeID).First(&tok).Error != nil {
+		return ErrRollbackDenied
+	}
+	if tok.UsedAt != nil && time.Since(*tok.UsedAt) > rollbackWindow {
+		return ErrRollbackDenied
+	}
 	// Get the peer public key before deleting
 	var peer models.WireGuardPeer
 	if err := s.db.Where("node_id = ?", nodeID).First(&peer).Error; err == nil {
@@ -250,6 +263,9 @@ func (s *EnrollmentService) Rollback(nodeID string) error {
 	log.Printf("↩️  Enrollment rolled back for node: %s", nodeID)
 	return nil
 }
+
+// ErrRollbackDenied means the rollback didn't come from the node's installer.
+var ErrRollbackDenied = errors.New("only the installer that enrolled this node can roll it back, within an hour")
 
 // helpers for RSA key generation
 func generateRSAKey() (*rsa.PrivateKey, error) {

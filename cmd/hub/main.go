@@ -103,6 +103,7 @@ func main() {
 
 	// Job service — handles job queue (claim/complete lifecycle for agents)
 	jobService := services.NewJobService(database)
+	jobService.StartStuckJobSweeper()
 
 	// Container service — manages raw container operations
 	containerService := services.NewContainerService(database)
@@ -201,6 +202,16 @@ func main() {
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
+		// The dashboard has a Health page at the same address: browsers
+		// opening it get the page, scripts and agents the JSON.
+		if strings.Contains(c.GetHeader("Accept"), "text/html") {
+			for _, f := range []string{"./dashboard/out/health/index.html", "./dashboard/out/health.html"} {
+				if _, err := os.Stat(f); err == nil {
+					c.File(f)
+					return
+				}
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"status": "healthy",
 			"time":   time.Now().Format(time.RFC3339),
@@ -542,6 +553,11 @@ echo "Agent updated successfully"
 			operator.DELETE("/deploy/tokens/:id", deployHandler.RemoveGitHubToken)
 			operator.GET("/deploy/history", deployHandler.ListDeployments)
 		}
+
+		// Admin only - forget a node (its apps must have moved off it)
+		protected.DELETE("/nodes/:id", middleware.RequireRole(models.RoleAdmin), func(c *gin.Context) {
+			nodeService.Remove(c, wireGuardService.RemovePeer)
+		})
 
 		// Admin only - Enrollment token management
 		adminEnrollment := protected.Group("/enrollment")

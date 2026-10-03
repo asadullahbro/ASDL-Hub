@@ -4,28 +4,15 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { AllowedRepo, GitHubToken, OIDCDeployment } from '../../types';
 import { Github, RefreshCw, X, Plus, Trash2, Key } from 'lucide-react';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { Badge, StatusBadge } from '@/components/ui/Badge';
+import { Card, EmptyState } from '@/components/ui/Card';
+import { Field, inputClass } from '@/components/ui/Modal';
 
 const hubUrl = typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
   ? window.location.origin
   : process.env.NEXT_PUBLIC_HUB_URL || 'https://your-hub-url';
-
-function statusDot(status: string) {
-  const map: Record<string, string> = {
-    dispatched: 'bg-status-green',
-    pending:    'bg-status-yellow',
-    failed:     'bg-status-red',
-  };
-  return map[status] ?? 'bg-text-muted';
-}
-
-function statusText(status: string) {
-  const map: Record<string, string> = {
-    dispatched: 'text-status-green',
-    pending:    'text-status-yellow',
-    failed:     'text-status-red',
-  };
-  return map[status] ?? 'text-text-muted';
-}
 
 function shortSHA(sha: string) {
   return sha?.slice(0, 7) ?? '—';
@@ -45,6 +32,7 @@ export default function GitHubPage() {
   const [allowed, setAllowed]     = useState<AllowedRepo[]>([]);
   const [tokens, setTokens]       = useState<GitHubToken[]>([]);
   const [history, setHistory]     = useState<OIDCDeployment[]>([]);
+  const [names, setNames]         = useState<Record<string, string>>({});
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
@@ -66,6 +54,11 @@ export default function GitHubPage() {
       setAllowed(allowedData ?? []);
       setTokens(tokensData ?? []);
       setHistory(historyData ?? []);
+      const [nodes, projects] = await Promise.all([
+        api.getNodes().catch(() => []),
+        api.getProjects(1, 200).then(r => r.data).catch(() => []),
+      ]);
+      setNames(Object.fromEntries([...nodes.map(n => [n.id, n.hostname]), ...projects.map(p => [p.id, p.name])]));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -132,291 +125,151 @@ export default function GitHubPage() {
   const tokenFormValid = tokenForm.label && tokenForm.token;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted text-sm">Loading...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-text-secondary">Loading…</div>;
   }
 
   return (
     <div className="space-y-6">
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Github className="h-5 w-5 text-text-primary" />
-          <h1 className="text-xl font-semibold text-text-primary">GitHub Actions</h1>
-        </div>
-        <button
-          onClick={loadData}
-          className="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </button>
-      </div>
+      <PageHeader
+        icon={Github}
+        title="GitHub"
+        description="Deploy from GitHub Actions: a push builds your image and the Hub deploys it. No deploy keys; the Hub checks the workflow's identity with GitHub."
+        actions={<Button variant="ghost" icon={RefreshCw} onClick={loadData}>Refresh</Button>}
+      />
 
       {error && (
         <div className="bg-status-red/10 border border-status-red/30 rounded-lg px-4 py-3 text-sm text-status-red flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-3 hover:opacity-70 transition-opacity">
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <button onClick={() => setError(null)} aria-label="Dismiss" className="ml-3 hover:opacity-70"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
 
-      {/* Authorized Repositories */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div>
-            <span className="text-sm font-medium text-text-primary">Authorized Repositories</span>
-            <p className="text-xs text-text-muted mt-0.5">
-              Only listed repositories can deploy. Projects are created automatically on first deploy.
-            </p>
-          </div>
-          <button
-            onClick={() => setShowRepoForm(f => !f)}
-            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
-          >
-            {showRepoForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add</>}
-          </button>
-        </div>
-
+      <Card
+        title="Authorized repositories"
+        description="Only these repositories can deploy. A project is created on a repository's first deploy."
+        flush
+        actions={
+          <Button icon={showRepoForm ? X : Plus} onClick={() => setShowRepoForm(f => !f)}>
+            {showRepoForm ? 'Cancel' : 'Add repository'}
+          </Button>
+        }
+      >
         {showRepoForm && (
           <div className="p-5 border-b border-border space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Repository</label>
-                <input
-                  type="text"
-                  value={repoForm.repository}
-                  onChange={e => setRepoForm(f => ({ ...f, repository: e.target.value }))}
-                  placeholder="owner/repo"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Environment</label>
-                <input
-                  type="text"
-                  value={repoForm.environment}
-                  onChange={e => setRepoForm(f => ({ ...f, environment: e.target.value }))}
-                  placeholder="production"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Repository">
+                <input value={repoForm.repository} onChange={e => setRepoForm(f => ({ ...f, repository: e.target.value }))} placeholder="owner/repo" className={`${inputClass} font-mono`} />
+              </Field>
+              <Field label="Environment">
+                <input value={repoForm.environment} onChange={e => setRepoForm(f => ({ ...f, environment: e.target.value }))} placeholder="production" className={`${inputClass} font-mono`} />
+              </Field>
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowRepoForm(false)}
-                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddRepo}
-                disabled={saving || !repoFormValid}
-                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Authorize'}
-              </button>
+            <div className="flex justify-end">
+              <Button variant="primary" loading={saving} disabled={!repoFormValid} onClick={handleAddRepo}>Authorize</Button>
             </div>
           </div>
         )}
-
         {allowed.length === 0 ? (
-          <div className="px-5 py-10 text-center">
-            <p className="text-sm text-text-muted">No repositories authorized</p>
-            <p className="text-xs text-text-secondary mt-1">
-              Add a repository to allow it to deploy via OIDC.
-            </p>
-          </div>
+          <EmptyState>No repositories yet. Add one to let it deploy.</EmptyState>
         ) : (
           <div className="divide-y divide-border">
             {allowed.map(r => (
-              <div key={r.id} className="flex items-center justify-between px-5 py-3.5 group">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-text-primary font-mono">{r.repository}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border text-text-muted font-mono">
-                      {r.environment}
-                    </span>
-                    {!r.enabled && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-red/10 border border-status-red/20 text-status-red">
-                        disabled
-                      </span>
-                    )}
-                  </div>
+              <div key={r.id} className="flex items-center justify-between px-5 py-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm text-text-primary font-mono truncate">{r.repository}</span>
+                  <Badge>{r.environment}</Badge>
+                  {!r.enabled && <Badge tone="danger">disabled</Badge>}
                 </div>
-                <button
-                  onClick={() => handleRemoveRepo(r.id)}
-                  disabled={deletingId === r.id}
-                  className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <Button variant="ghost" icon={Trash2} aria-label="Remove" className="hover:text-status-red" loading={deletingId === r.id} onClick={() => handleRemoveRepo(r.id)} />
               </div>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
-      {/* GitHub Tokens */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div>
-            <span className="text-sm font-medium text-text-primary">GitHub Tokens</span>
-            <p className="text-xs text-text-muted mt-0.5">
-              PATs used to pull private images from GHCR on your nodes. Needs <span className="font-mono">read:packages</span> scope.
-            </p>
-          </div>
-          <button
-            onClick={() => setShowTokenForm(f => !f)}
-            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
-          >
-            {showTokenForm ? <><X className="h-3 w-3" /> Cancel</> : <><Plus className="h-3 w-3" /> Add</>}
-          </button>
-        </div>
-
+      <Card
+        title="Registry tokens"
+        description={<>GitHub tokens nodes use to pull private images from GHCR. They need the <span className="font-mono">read:packages</span> scope.</>}
+        flush
+        actions={
+          <Button icon={showTokenForm ? X : Plus} onClick={() => setShowTokenForm(f => !f)}>
+            {showTokenForm ? 'Cancel' : 'Add token'}
+          </Button>
+        }
+      >
         {showTokenForm && (
           <div className="p-5 border-b border-border space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Label</label>
-                <input
-                  type="text"
-                  value={tokenForm.label}
-                  onChange={e => setTokenForm(f => ({ ...f, label: e.target.value }))}
-                  placeholder="e.g. personal, org-bot"
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Token</label>
-                <input
-                  type="password"
-                  value={tokenForm.token}
-                  onChange={e => setTokenForm(f => ({ ...f, token: e.target.value }))}
-                  placeholder="ghp_..."
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent font-mono"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Label">
+                <input value={tokenForm.label} onChange={e => setTokenForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. personal" className={inputClass} />
+              </Field>
+              <Field label="Token">
+                <input type="password" value={tokenForm.token} onChange={e => setTokenForm(f => ({ ...f, token: e.target.value }))} placeholder="ghp_…" className={`${inputClass} font-mono`} />
+              </Field>
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowTokenForm(false)}
-                className="text-sm text-text-muted hover:text-text-primary transition-colors px-3 py-1.5"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddToken}
-                disabled={saving || !tokenFormValid}
-                className="text-sm bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Add Token'}
-              </button>
+            <div className="flex justify-end">
+              <Button variant="primary" loading={saving} disabled={!tokenFormValid} onClick={handleAddToken}>Add token</Button>
             </div>
           </div>
         )}
-
         {tokens.length === 0 ? (
-          <div className="px-5 py-10 text-center">
-            <p className="text-sm text-text-muted">No tokens added</p>
-            <p className="text-xs text-text-secondary mt-1">
-              Add a PAT to pull private images from GHCR during deployment.
-            </p>
-          </div>
+          <EmptyState>No tokens. Public images don&apos;t need one.</EmptyState>
         ) : (
           <div className="divide-y divide-border">
             {tokens.map(t => (
-              <div key={t.id} className="flex items-center justify-between px-5 py-3.5 group">
+              <div key={t.id} className="flex items-center justify-between px-5 py-3">
                 <div className="flex items-center gap-3">
-                  <Key className="h-3.5 w-3.5 text-text-muted flex-shrink-0" />
+                  <Key className="h-4 w-4 text-text-muted flex-shrink-0" />
                   <div>
-                    <span className="text-sm text-text-primary">{t.label}</span>
-                    <div className="text-xs text-text-muted font-mono mt-0.5">{t.token}</div>
+                    <div className="text-sm text-text-primary">{t.label}</div>
+                    <div className="text-xs text-text-secondary font-mono mt-0.5">{t.token}</div>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleRemoveToken(t.id)}
-                  disabled={deletingId === t.id}
-                  className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-status-red transition-all p-1.5 rounded hover:bg-status-red/10 disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <Button variant="ghost" icon={Trash2} aria-label="Remove" className="hover:text-status-red" loading={deletingId === t.id} onClick={() => handleRemoveToken(t.id)} />
               </div>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
-      {/* Deployment History */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="px-5 py-4 border-b border-border">
-          <span className="text-sm font-medium text-text-primary">Deployment History</span>
-          <p className="text-xs text-text-muted mt-0.5">Audit log of all OIDC-authenticated deployments.</p>
-        </div>
-
+      <Card title="Deploy history" description="Every deploy GitHub Actions asked for." flush>
         {history.length === 0 ? (
-          <div className="px-5 py-10 text-center">
-            <p className="text-sm text-text-muted">No deployments yet</p>
-            <p className="text-xs text-text-secondary mt-1">
-              Deployments triggered from GitHub Actions will appear here.
-            </p>
-          </div>
+          <EmptyState>No deploys yet. They appear here after your workflow runs.</EmptyState>
         ) : (
           <div className="divide-y divide-border">
             {history.map(d => (
-              <div key={d.id} className="flex items-center justify-between px-5 py-3.5">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`h-2 w-2 rounded-full flex-shrink-0 ${statusDot(d.status)}`} />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-text-primary font-mono truncate">{d.repository}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border text-text-muted font-mono flex-shrink-0">
-                        {d.environment}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
-                      <span className={statusText(d.status)}>{d.status}</span>
-                      <span className="text-border">·</span>
-                      <span className="font-mono">{shortSHA(d.sha)}</span>
-                      <span className="text-border">·</span>
-                      <span className="font-mono truncate max-w-[200px]">{d.image}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-xs text-text-muted">
-                      <span className="font-mono">project: {d.project_id.slice(0, 8)}</span>
-                      <span className="text-border">·</span>
-                      <span className="font-mono">node: {d.node_id.slice(0, 8)}</span>
-                    </div>
-                    {d.error && (
-                      <div className="mt-1 text-xs text-status-red font-mono truncate max-w-sm">
-                        {d.error}
-                      </div>
-                    )}
+              <div key={d.id} className="flex items-start justify-between gap-4 px-5 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-text-primary font-mono truncate">{d.repository}</span>
+                    <StatusBadge status={d.status} />
                   </div>
+                  <div className="text-xs text-text-secondary mt-1 flex flex-wrap gap-x-2">
+                    <span className="font-mono">{shortSHA(d.sha)}</span>
+                    <span>·</span>
+                    <span>{names[d.project_id] ?? 'deleted project'}</span>
+                    <span>·</span>
+                    <span>{names[d.node_id] ?? 'removed node'}</span>
+                  </div>
+                  {d.error && <div className="mt-1 text-xs text-status-red font-mono truncate max-w-xl">{d.error}</div>}
                 </div>
-                <div className="flex-shrink-0 text-xs text-text-muted ml-4">
-                  {timeAgo(d.created_at)}
-                </div>
+                <div className="flex-shrink-0 text-xs text-text-secondary">{timeAgo(d.created_at)}</div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
-      {/* Workflow snippet */}
-      <div className="bg-surface border border-border rounded-lg">
-        <div className="px-5 py-4 border-b border-border">
-          <span className="text-sm font-medium text-text-primary">Workflow Setup</span>
-          <p className="text-xs text-text-muted mt-0.5">
-            Add this to your GitHub Actions workflow. No secrets required beyond <span className="font-mono">GITHUB_TOKEN</span>.
-          </p>
-        </div>
-        <div className="p-5">
-          <pre className="bg-background border border-border rounded p-4 text-xs text-text-secondary font-mono overflow-x-auto leading-relaxed">{`permissions:
+      <Card
+        title="Workflow"
+        description={
+          <>
+            Add this to <span className="font-mono">.github/workflows/deploy.yml</span> in an authorized repository. No secrets needed beyond{' '}
+            <span className="font-mono">GITHUB_TOKEN</span>.
+          </>
+        }
+      >
+        <pre className="bg-background border border-border rounded-md p-4 text-xs text-text-secondary font-mono overflow-x-auto leading-relaxed">{`permissions:
   contents: read
   id-token: write
   packages: write
@@ -460,10 +313,8 @@ jobs:
               "oidc_token": "\${{ steps.oidc.outputs.token }}",
               "image":      "\${{ steps.build.outputs.image }}"
             }'`}
-          </pre>
-        </div>
-      </div>
-
+        </pre>
+      </Card>
     </div>
   );
 }

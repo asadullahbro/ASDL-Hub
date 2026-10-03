@@ -1,5 +1,7 @@
 'use client';
 
+import { X } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useEffect, useRef, useCallback } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
@@ -137,18 +139,18 @@ export function NodeTerminal({ nodeId, onClose }: NodeTerminalProps) {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-status-green" />
           <span className="text-xs text-text-secondary font-mono">
-            node terminal — {nodeId.slice(0, 8)}
+            Terminal · {nodeId.slice(0, 8)}
           </span>
         </div>
-        <button
+        <Button
+          icon={X}
           onClick={() => {
             wsRef.current?.close();
             onClose();
           }}
-          className="text-text-muted hover:text-text-primary transition-colors text-xs font-mono px-2 py-1 border border-border rounded hover:bg-surface-hover"
         >
-          ✕ close
-        </button>
+          Close
+        </Button>
       </div>
 
       {/* Terminal */}

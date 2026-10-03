@@ -162,6 +162,10 @@ export const api = {
   getNodeConnection: (id: string): Promise<NodeConnection> =>
     request<NodeConnection>(`/nodes/${id}/connection`),
 
+  // Admin: forget a node (its apps must have moved off it first).
+  removeNode: (id: string): Promise<{ removed: string }> =>
+    request<{ removed: string }>(`/nodes/${id}`, { method: 'DELETE' }),
+
   setNodeMaintenance: (id: string, enabled: boolean): Promise<MaintenanceResult> =>
     request<MaintenanceResult>(`/nodes/${id}/maintenance`, {
       method: 'PUT',

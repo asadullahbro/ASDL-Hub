@@ -5,7 +5,9 @@ import { api } from '@/lib/api';
 import { Job } from '@/types';
 import { JobTable } from '@/components/jobs/JobTable';
 import { Button } from '@/components/ui/Button';
-import { Plus } from 'lucide-react';
+import { ListTodo, Plus } from 'lucide-react';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Card } from '@/components/ui/Card';
 import { CreateJobModal } from '@/components/jobs/CreateJobModal';
 import { JobDetailsModal } from '@/components/jobs/JobDetailsModal';
 import { Pagination } from '@/components/ui/Pagination';
@@ -18,6 +20,7 @@ export default function JobsPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 0, limit: 20 });
+  const [nodeNames, setNodeNames] = useState<Record<string, string>>({});
 
   // Links from notifications open a job directly: /jobs?id=<job id>.
   useEffect(() => {
@@ -41,7 +44,11 @@ export default function JobsPage() {
 
   useEffect(() => {
     loadJobs();
-  }, [page]);
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    api.getNodes().then(n => setNodeNames(Object.fromEntries(n.map(x => [x.id, x.hostname])))).catch(() => {});
+  }, []);
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
@@ -54,39 +61,29 @@ export default function JobsPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted">Loading jobs...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-text-secondary">Loading…</div>;
   }
 
   if (error) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-status-red">{error}</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-status-red">{error}</div>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text-primary">Jobs</h1>
-        <div className="flex items-center gap-4">
-          <Button onClick={() => setShowCreateModal(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            New Job
+      <PageHeader
+        icon={ListTodo}
+        title="Jobs"
+        description={`Everything the Hub has asked a node to do: deploys, moves, logs and commands. ${pagination.total} in total.`}
+        actions={
+          <Button variant="primary" icon={Plus} onClick={() => setShowCreateModal(true)}>
+            New job
           </Button>
-          <span className="text-sm text-text-muted">
-            {pagination.total} total jobs
-          </span>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="bg-surface border border-border rounded-lg overflow-hidden">
-        <JobTable jobs={jobs} onViewJob={setSelectedJobId} />
-      </div>
+      <Card flush>
+        <JobTable jobs={jobs} nodeNames={nodeNames} onViewJob={setSelectedJobId} />
+      </Card>
 
       <Pagination
         currentPage={page}
@@ -103,6 +100,7 @@ export default function JobsPage() {
       />
 
       <JobDetailsModal
+        nodeNames={nodeNames}
         jobId={selectedJobId}
         open={!!selectedJobId}
         onClose={() => setSelectedJobId(null)}

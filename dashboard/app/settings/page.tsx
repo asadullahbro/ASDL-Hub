@@ -5,6 +5,12 @@ import { HubVersion } from '@/components/settings/HubVersion';
 import { api } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Node, User, PermanentToken, EnrollmentToken } from '@/types';
+import { Settings as SettingsIcon } from 'lucide-react';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { Badge, StatusBadge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
+import { Field as UIField, Modal as UIModal, inputClass } from '@/components/ui/Modal';
 
 // --- Types ---
 type Section = 'tokens' | 'users' | 'master-node' | 'nginx' | 'agents';
@@ -23,8 +29,8 @@ function SudoModal({
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setLoading(true);
     setError('');
     try {
@@ -37,150 +43,60 @@ function SudoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-surface border border-border rounded-lg w-full max-w-sm p-6">
-        <h2 className="text-sm font-semibold text-text-primary mb-1">{title}</h2>
-        <p className="text-xs text-text-muted mb-5">Confirm your admin password to continue.</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1.5">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full h-9 px-3 bg-background border border-border rounded-md text-sm text-text-primary font-mono focus:outline-none focus:border-border-strong focus:ring-1 focus:ring-accent/20 transition-colors"
-              autoFocus
-              required
-            />
-          </div>
-          {error && (
-            <p className="text-xs text-status-red font-mono">{error}</p>
-          )}
-          <div className="flex gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 h-9 border border-border rounded-md text-xs text-text-secondary hover:bg-surface-hover transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 h-9 bg-accent text-black text-xs font-semibold rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Verifying...' : 'Confirm'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <UIModal
+      title={title}
+      size="sm"
+      onClose={onCancel}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" loading={loading} onClick={() => submit()}>Confirm</Button>
+        </>
+      }
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-xs text-text-secondary">Confirm your admin password to continue.</p>
+        <UIField label="Password">
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputClass} autoFocus required />
+        </UIField>
+        {error && <p className="text-xs text-status-red">{error}</p>}
+      </form>
+    </UIModal>
   );
 }
 
 // --- Generic Modal ---
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="bg-surface border border-border rounded-lg w-full max-w-sm p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
-          <button
-            onClick={onClose}
-            className="text-text-muted hover:text-text-primary transition-colors text-lg leading-none"
-          >
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <UIModal title={title} size="sm" onClose={onClose}>
+      {children}
+    </UIModal>
   );
 }
 
 // --- Section wrapper ---
-function SectionCard({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
+function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="px-5 py-4 border-b border-border bg-surface">
-        <h2 className="text-sm font-medium text-text-primary">{title}</h2>
-        {description && (
-          <p className="text-xs text-text-muted mt-0.5">{description}</p>
-        )}
-      </div>
-      <div className="p-5 bg-background">{children}</div>
-    </div>
-  );
-}
-
-// --- Field ---
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1.5">
-        {label}
-      </label>
+    <Card title={title} description={description}>
       {children}
-    </div>
+    </Card>
   );
 }
 
-function Input({
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={`w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-border-strong focus:ring-1 focus:ring-accent/20 transition-colors ${props.className ?? ''}`}
-    />
-  );
+const Field = UIField;
+
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${inputClass} ${props.className ?? ''}`} />;
 }
 
 function Btn({
   variant = 'default',
-  loading,
-  children,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'default' | 'primary' | 'danger';
   loading?: boolean;
 }) {
-  const base = 'h-9 px-4 rounded-md text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-2';
-  const variants = {
-    default: 'border border-border text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-    primary: 'bg-accent text-black font-semibold hover:bg-accent-hover',
-    danger: 'border border-status-red/30 text-status-red hover:bg-status-red/10',
-  };
-  return (
-    <button {...props} disabled={loading || props.disabled} className={`${base} ${variants[variant]}`}>
-      {loading ? <span className="animate-spin">↻</span> : null}
-      {children}
-    </button>
-  );
+  return <Button variant={variant === 'default' ? 'secondary' : variant} {...props} />;
 }
 
 // ============================================================
@@ -188,6 +104,7 @@ function Btn({
 // ============================================================
 export default function SettingsPage() {
   const { user } = useAuth();
+  const installCmd = `curl -fsSL ${typeof window !== 'undefined' ? window.location.origin : ''}/install | sudo bash`;
   const [nodes, setNodes] = useState<Node[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [tokens, setTokens] = useState<PermanentToken[]>([]);
@@ -369,30 +286,20 @@ export default function SettingsPage() {
     }
   };
 
-  const roleBadge = (role: string) => {
-    const map: Record<string, string> = {
-      admin:    'badge-completed',
-      operator: 'badge-running',
-      viewer:   'badge-pending',
-    };
-    return map[role] ?? 'badge-pending';
-  };
-
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-medium text-text-primary">Settings</h1>
-        {feedback && (
-          <div className={`text-xs font-mono px-3 py-1.5 rounded-md border ${
-            feedback.type === 'ok'
-              ? 'bg-status-green/10 text-status-green border-status-green/20'
-              : 'bg-status-red/10 text-status-red border-status-red/20'
-          }`}>
-            {feedback.msg}
-          </div>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        icon={SettingsIcon}
+        title="Settings"
+        description="Tokens, users, the master node, routes, agents and Hub updates."
+        actions={
+          feedback && (
+            <Badge tone={feedback.type === 'ok' ? 'success' : 'danger'} className="text-xs py-1">
+              {feedback.msg}
+            </Badge>
+          )
+        }
+      />
 
       {/* 1. Permanent Tokens */}
       <SectionCard
@@ -401,14 +308,14 @@ export default function SettingsPage() {
       >
         <div className="space-y-3">
           {tokens.length === 0 ? (
-            <p className="text-xs text-text-muted font-mono">No tokens yet.</p>
+            <p className="text-sm text-text-secondary">No tokens yet.</p>
           ) : (
             <div className="divide-y divide-border border border-border rounded-md overflow-hidden">
               {tokens.map(t => (
                 <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-surface">
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium text-text-primary">{t.name}</div>
-                    <div className="text-[10px] text-text-muted font-mono mt-0.5">
+                    <div className="text-xs text-text-secondary mt-0.5">
                       {t.token_hint} · created {new Date(t.created_at).toLocaleDateString()}
                     </div>
                   </div>
@@ -428,16 +335,9 @@ export default function SettingsPage() {
 
           {newToken && (
             <div className="bg-status-green/5 border border-status-green/20 rounded-md p-3">
-              <p className="text-[10px] uppercase tracking-wider text-status-green mb-1.5">
-                Token generated — copy it now, it won't be shown again
-              </p>
-              <code className="text-xs text-text-primary font-mono break-all">{newToken}</code>
-              <button
-                onClick={() => { navigator.clipboard.writeText(newToken); toast('ok', 'Copied'); }}
-                className="mt-2 text-[10px] text-accent hover:underline block"
-              >
-                Copy to clipboard
-              </button>
+              <p className="text-xs text-status-green mb-2">Token created. Copy it now: it won&apos;t be shown again.</p>
+              <code className="text-xs text-text-primary font-mono break-all block mb-3">{newToken}</code>
+              <Btn onClick={() => { navigator.clipboard.writeText(newToken); toast('ok', 'Copied'); }}>Copy</Btn>
             </div>
           )}
 
@@ -477,9 +377,9 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium text-text-primary">{u.username}</div>
-                  <div className="text-[10px] text-text-muted mt-0.5">{u.email}</div>
+                  <div className="text-xs text-text-secondary mt-0.5">{u.email}</div>
                 </div>
-                <span className={`badge ${roleBadge(u.role)}`}>{u.role}</span>
+                <StatusBadge status={u.role} />
                 <select
                   value={u.role}
                   onChange={e => handleChangeRole(u.id, e.target.value)}
@@ -521,7 +421,7 @@ export default function SettingsPage() {
                   <span className={`w-1.5 h-1.5 rounded-full ${masterNode.online ? 'bg-status-green' : 'bg-status-red'}`} />
                   <span className="text-xs font-medium text-text-primary font-mono">{masterNode.hostname}</span>
                 </div>
-                <p className="text-[10px] text-text-muted font-mono mt-1">{masterNode.vpn_ip}</p>
+                <p className="text-xs text-text-secondary font-mono mt-1">{masterNode.vpn_ip}</p>
               </div>
             ) : (
               <span className="text-xs text-text-muted">No master node set — failover picks healthiest.</span>
@@ -550,7 +450,7 @@ export default function SettingsPage() {
         description="Regenerate and reload the Nginx reverse proxy config from current running projects."
       >
         <div className="flex items-center justify-between">
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-text-secondary">
             Triggers a config update across all nodes with active projects.
           </p>
           <Btn
@@ -571,7 +471,7 @@ export default function SettingsPage() {
         description="Dispatch an update job to all online nodes. Agents will download and restart."
       >
         <div className="flex items-center justify-between">
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-text-secondary">
             Dispatches to {nodes.filter(n => n.online).length} online node
             {nodes.filter(n => n.online).length !== 1 ? 's' : ''}.
           </p>
@@ -591,21 +491,20 @@ export default function SettingsPage() {
 >
   <div className="space-y-4">
     {/* Install command */}
-    <div className="bg-surface border border-border rounded-md p-3">
-      <p className="text-[10px] uppercase tracking-wider text-text-muted mb-2">Install command</p>
+    <div className="bg-background border border-border rounded-md p-3">
+      <p className="text-xs text-text-secondary mb-2">Install command</p>
       <div className="flex items-center gap-2">
         <code className="text-xs text-text-primary font-mono flex-1 truncate">
-          curl -fsSL https://hub.asdl.website/install | sudo bash
+          {installCmd}
         </code>
-        <button
+        <Btn
           onClick={() => {
-            navigator.clipboard.writeText('curl -fsSL https://hub.asdl.website/install | sudo bash');
+            navigator.clipboard.writeText(installCmd);
             toast('ok', 'Copied');
           }}
-          className="text-[10px] text-accent hover:underline flex-shrink-0"
         >
           Copy
-        </button>
+        </Btn>
       </div>
     </div>
 
@@ -618,7 +517,7 @@ export default function SettingsPage() {
             <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-surface">
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium text-text-primary">{t.label}</div>
-                <div className="text-[10px] text-text-muted font-mono mt-0.5">
+                <div className="text-xs text-text-secondary mt-0.5">
                   {t.used
                     ? `used · node ${t.used_by.slice(0, 8)}`
                     : expired
@@ -628,24 +527,13 @@ export default function SettingsPage() {
               </div>
               {!t.used && !expired && (
                 <div className="flex items-center gap-2">
-                  <code className="text-[10px] text-accent font-mono bg-accent/5 border border-accent/20 px-2 py-0.5 rounded">
+                  <code className="text-xs text-accent font-mono bg-accent/5 border border-accent/20 px-2 py-0.5 rounded">
                     {t.token}
                   </code>
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(t.token); toast('ok', 'Token copied'); }}
-                    className="text-[10px] text-text-muted hover:text-accent transition-colors"
-                  >
-                    Copy
-                  </button>
+                  <Btn onClick={() => { navigator.clipboard.writeText(t.token); toast('ok', 'Token copied'); }}>Copy</Btn>
                 </div>
               )}
-              <span className={`badge ${
-                t.used ? 'badge-completed' :
-                expired ? 'badge-failed' :
-                'badge-running'
-              }`}>
-                {t.used ? 'used' : expired ? 'expired' : 'active'}
-              </span>
+              <StatusBadge status={t.used ? 'completed' : expired ? 'failed' : 'running'} label={t.used ? 'used' : expired ? 'expired' : 'active'} />
               {!t.used && (
                 <Btn
                   variant="danger"
@@ -786,7 +674,7 @@ export default function SettingsPage() {
                 ))}
               </select>
             </Field>
-            <p className="text-[10px] text-text-muted">
+            <p className="text-xs text-text-secondary">
               All projects will migrate to this node when it comes online.
               No project will ever be migrated away from it.
             </p>

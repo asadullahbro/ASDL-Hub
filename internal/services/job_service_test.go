@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -166,5 +167,25 @@ func TestJobCreate_UnknownNodeRejected(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for unknown node, got %d", w.Code)
+	}
+}
+
+func TestFailStuckJobs(t *testing.T) {
+	db := testutil.NewDB(t, &models.Job{}, &models.Deployment{}, &models.OIDCDeployment{}, &models.Project{})
+	s := NewJobService(db)
+	now := time.Now()
+	old := now.Add(-3 * time.Hour)
+	recent := now.Add(-10 * time.Minute)
+	db.Create(&models.Job{ID: "stuck", Type: "failover_stop", Status: models.JobStatusRunning, StartedAt: &old, CreatedAt: old})
+	db.Create(&models.Job{ID: "long", Type: "command", Status: models.JobStatusRunning, StartedAt: &old, Timeout: 4 * 3600, CreatedAt: old})
+	db.Create(&models.Job{ID: "fresh", Type: "command", Status: models.JobStatusRunning, StartedAt: &recent, CreatedAt: recent})
+	s.failStuckJobs(now)
+	want := map[string]string{"stuck": models.JobStatusFailed, "long": models.JobStatusRunning, "fresh": models.JobStatusRunning}
+	for id, st := range want {
+		var j models.Job
+		db.First(&j, "id = ?", id)
+		if j.Status != st {
+			t.Errorf("%s: %s, want %s", id, j.Status, st)
+		}
 	}
 }

@@ -1,49 +1,53 @@
 import { ReactNode, ButtonHTMLAttributes } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
+// The dashboard's one button. primary: the main action of a page or dialog;
+// secondary: everything else; danger: removes or revokes something; ghost:
+// quiet actions in toolbars and rows.
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  children: ReactNode;
+  children?: ReactNode;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md';
+  icon?: LucideIcon;
   loading?: boolean;
 }
 
 const variantStyles = {
-  primary: 'bg-accent text-black hover:bg-accent-hover focus-visible:outline-accent',
-  secondary: 'bg-surface border border-border hover:bg-surface-hover text-text-primary',
-  danger: 'bg-red-500 text-white hover:bg-red-600 focus-visible:outline-red-500',
-  ghost: 'hover:bg-surface-hover text-text-secondary hover:text-text-primary',
+  primary: 'bg-accent text-black border border-accent hover:bg-accent-hover hover:border-accent-hover',
+  secondary: 'bg-surface border border-border hover:bg-surface-hover hover:border-border-strong text-text-primary',
+  danger: 'bg-transparent border border-status-red/40 text-status-red hover:bg-status-red/10',
+  ghost: 'border border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
 };
 
 const sizeStyles = {
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-sm',
-  lg: 'px-6 py-3 text-base',
+  sm: 'h-8 px-3 text-xs gap-1.5',
+  md: 'h-9 px-4 text-sm gap-2',
 };
 
 export function Button({
   children,
-  variant = 'primary',
-  size = 'md',
+  variant = 'secondary',
+  size = 'sm',
+  icon: Icon,
   loading = false,
   className = '',
   disabled,
+  type = 'button',
   ...props
 }: ButtonProps) {
   return (
     <button
-      className={`
-        inline-flex items-center justify-center rounded-md font-medium transition-colors
-        focus-visible:outline-2 focus-visible:outline-offset-2
-        disabled:opacity-50 disabled:pointer-events-none
-        ${variantStyles[variant]}
-        ${sizeStyles[size]}
-        ${className}
-      `}
+      type={type}
+      className={`inline-flex items-center justify-center rounded-md font-medium transition-colors whitespace-nowrap
+        focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent
+        disabled:opacity-50 disabled:pointer-events-none ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
       disabled={disabled || loading}
       {...props}
     >
       {loading ? (
-        <span className="inline-block w-4 h-4 mr-2 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        <span className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      ) : Icon ? (
+        <Icon className={size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
       ) : null}
       {children}
     </button>

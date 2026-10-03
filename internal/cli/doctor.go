@@ -206,7 +206,7 @@ func (e *env) doctorNodes(r *report, c *client, nodes []node, apps []project) {
 					"They move by themselves if they stop answering; check the node: asdl-agent doctor (on it)")
 			} else {
 				r.add(levelWarn, fmt.Sprintf("%s is offline (last seen %s)", n.Hostname, ago(n.LastHeartbeat)),
-					"If the machine is on: run asdl-agent doctor on it. If it's gone for good, remove it in the dashboard.")
+					"If the machine is on: run asdl-agent doctor on it. If it's gone for good: asdl-hub node remove "+n.Hostname)
 			}
 			continue
 		}

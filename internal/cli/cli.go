@@ -31,6 +31,7 @@ Apps
 
 Nodes
   maintenance <node> on|off   Move apps off a node before working on it, or end that
+  node remove <node>          Forget a node for good (move its apps off first)
 
 Jobs and alerts
   jobs [-n count]             Recent jobs
@@ -164,6 +165,20 @@ func (e *env) run(cmd string, args []string) error {
 			return err
 		}
 		return e.logs(c, app[0], *n)
+	case "node":
+		if len(args) < 2 || args[0] != "remove" {
+			return usageError{"expected asdl-hub node remove <node> [--yes]"}
+		}
+		yes := false
+		var name string
+		for _, a := range args[1:] {
+			if a == "--yes" || a == "-y" {
+				yes = true
+			} else {
+				name = a
+			}
+		}
+		return e.removeNode(c, name, yes)
 	case "maintenance":
 		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
 			return usageError{"expected asdl-hub maintenance <node> on|off"}

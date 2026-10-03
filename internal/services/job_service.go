@@ -502,3 +502,39 @@ func (s *JobService) Retry(c *gin.Context) {
 	redactEnvironment(newJob)
 	c.JSON(http.StatusCreated, newJob)
 }
+
+// stuckJobAfter is how long a job may run without the node reporting back
+// (or its own timeout, if longer) before it is marked failed. A node that
+// restarts mid-job never reports it.
+const stuckJobAfter = time.Hour
+
+// StartStuckJobSweeper marks jobs that have been running for too long as
+// failed, every minute.
+func (s *JobService) StartStuckJobSweeper() {
+	go func() {
+		for {
+			s.failStuckJobs(time.Now())
+			time.Sleep(time.Minute)
+		}
+	}()
+}
+
+func (s *JobService) failStuckJobs(now time.Time) {
+	var jobs []models.Job
+	s.db.Where("status = ? AND started_at < ?", models.JobStatusRunning, now.Add(-stuckJobAfter)).Find(&jobs)
+	for i := range jobs {
+		j := &jobs[i]
+		if j.StartedAt == nil || now.Sub(*j.StartedAt) < time.Duration(j.Timeout)*time.Second {
+			continue
+		}
+		j.Status = models.JobStatusFailed
+		j.Logs += fmt.Sprintf("\n\nThe node never reported how this job ended (it started %s ago); marked failed.", now.Sub(*j.StartedAt).Round(time.Minute))
+		j.CompletedAt = &now
+		j.Environment = nil
+		s.db.Save(j)
+		log.Printf("⚠️ Job %s (%s) was running for %s without a result; marked failed", j.ID, j.Type, now.Sub(*j.StartedAt).Round(time.Minute))
+		if j.Type == models.JobTypeDeploy {
+			s.completeDeploy(j, now)
+		}
+	}
+}

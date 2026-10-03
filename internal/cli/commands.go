@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 type node struct {
@@ -712,5 +715,36 @@ func (e *env) whoami(c *client) error {
 		return err
 	}
 	fmt.Fprintf(e.out, "%s (%s) on %s, using %s\n", me.Username, me.Role, c.url, c.where)
+	return nil
+}
+
+func (e *env) removeNode(c *client, name string, yes bool) error {
+	n, err := c.findNode(name)
+	if err != nil {
+		return err
+	}
+	if !yes {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return usageError{"add --yes to remove a node without a prompt"}
+		}
+		state := "offline"
+		if n.Online {
+			state = "ONLINE: its agent will be cut off from the Hub"
+		}
+		fmt.Fprintf(e.out, "Remove %s (%s, %s)? Its WireGuard access, keys and history go too. [y/N] ", n.Hostname, n.VPNIP, state)
+		var answer string
+		fmt.Fscanln(os.Stdin, &answer)
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			fmt.Fprintln(e.out, "Nothing removed.")
+			return nil
+		}
+	}
+	if err := c.do("DELETE", "/nodes/"+n.ID, nil, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.out, "Removed %s.\n", n.Hostname)
+	if n.Online {
+		fmt.Fprintln(e.out, "Uninstall the agent on that machine: https://docs.asdl.website/hub/add-a-node/#remove-a-node")
+	}
 	return nil
 }

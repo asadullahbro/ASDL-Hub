@@ -86,11 +86,11 @@ export function Sidebar() {
 
         {/* Main nav */}
         <nav className="flex-1 p-2 pt-3 space-y-0.5 overflow-y-auto">
-          <p className="px-3 pb-1.5 text-[10px] uppercase tracking-widest text-text-muted">
+          <p className="px-3 pb-1.5 text-[11px] uppercase tracking-wider text-text-muted">
             Main
           </p>
           {navigation.filter(item => !item.adminOnly || user?.role === 'admin').map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -111,11 +111,11 @@ export function Sidebar() {
             );
           })}
 
-          <p className="px-3 pt-4 pb-1.5 text-[10px] uppercase tracking-widest text-text-muted">
+          <p className="px-3 pt-4 pb-1.5 text-[11px] uppercase tracking-wider text-text-muted">
             System
           </p>
           {bottom.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -142,7 +142,7 @@ export function Sidebar() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-accent text-[10px] font-semibold uppercase">
+                <span className="text-accent text-[11px] font-semibold uppercase">
                   {user?.username?.[0] ?? 'U'}
                 </span>
               </div>

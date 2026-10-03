@@ -50,9 +50,7 @@ export default function LoginPage() {
       {/* Left panel */}
       <div className="hidden md:flex w-56 flex-col border-r border-border bg-surface p-6">
         <div className="flex items-center gap-2 mb-8">
-          <div className="w-6 h-6 rounded-md bg-accent flex items-center justify-center flex-shrink-0">
-            <span className="text-black text-xs font-bold">A</span>
-          </div>
+          <img src="/icon.svg" alt="" className="w-6 h-6 flex-shrink-0" />
           <span className="text-sm font-semibold text-text-primary tracking-wide">ASDL Hub</span>
         </div>
 
@@ -73,7 +71,7 @@ export default function LoginPage() {
                 <span className="text-xs text-text-primary font-mono flex-1 truncate">
                   {node.hostname}
                 </span>
-                <span className="text-[10px] text-text-muted font-mono">
+                <span className="text-xs text-text-secondary">
                   {node.online && node.ping_latency > 0
                     ? `${Math.round(node.ping_latency)}ms`
                     : '—'}
@@ -95,14 +93,12 @@ export default function LoginPage() {
         <div className="mt-auto pt-4 border-t border-border space-y-1">
           {status ? (
             <>
-              <p className="text-[10px] text-text-muted font-mono">v0.4.1-beta</p>
-              <p className="text-[10px] text-text-muted font-mono">mesh: WireGuard</p>
-              <p className="text-[10px] text-text-muted font-mono">
-                agents: {status.online}/{status.total} online
+              <p className="text-xs text-text-secondary">
+                {status.online} of {status.total} nodes online
               </p>
             </>
           ) : (
-            <p className="text-[10px] text-text-muted font-mono animate-pulse">connecting...</p>
+            <p className="text-xs text-text-secondary animate-pulse">Connecting…</p>
           )}
         </div>
       </div>
@@ -112,9 +108,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 md:hidden">
-            <div className="w-6 h-6 rounded-md bg-accent flex items-center justify-center">
-              <span className="text-black text-xs font-bold">A</span>
-            </div>
+            <img src="/icon.svg" alt="" className="w-6 h-6" />
             <span className="text-sm font-semibold text-text-primary tracking-wide">ASDL Hub</span>
           </div>
 
@@ -125,7 +119,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="username"
-                className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1.5"
+                className="block text-xs text-text-secondary mb-1.5"
               >
                 Username
               </label>
@@ -134,7 +128,7 @@ export default function LoginPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong focus:ring-1 focus:ring-accent/20 transition-colors font-mono"
+                className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
                 placeholder="asadullah"
                 required
               />
@@ -143,7 +137,7 @@ export default function LoginPage() {
             <div>
               <label
                 htmlFor="password"
-                className="block text-[10px] uppercase tracking-wider text-text-secondary mb-1.5"
+                className="block text-xs text-text-secondary mb-1.5"
               >
                 Password
               </label>
@@ -152,14 +146,14 @@ export default function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong focus:ring-1 focus:ring-accent/20 transition-colors font-mono"
+                className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
                 placeholder="••••••••"
                 required
               />
             </div>
 
             {error && (
-              <div className="text-status-red text-xs text-center bg-status-red/10 border border-status-red/20 px-3 py-2 rounded-md font-mono">
+              <div className="text-status-red text-xs text-center bg-status-red/10 border border-status-red/20 px-3 py-2 rounded-md">
                 {error}
               </div>
             )}
@@ -169,29 +163,25 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full h-9 bg-accent text-black text-sm font-semibold rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 mt-2"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
 
           <div className="mt-8 pt-6 border-t border-border space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-text-muted font-mono">cluster status</span>
+              <span className="text-xs text-text-secondary">cluster status</span>
               <div className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   status
                     ? status.online > 0 ? 'bg-status-green' : 'bg-status-red'
                     : 'bg-text-muted animate-pulse'
                 }`} />
-                <span className="text-[10px] text-text-muted font-mono">
+                <span className="text-xs text-text-secondary">
                   {status
-                    ? status.online > 0 ? 'operational' : 'degraded'
-                    : 'checking...'}
+                    ? status.online > 0 ? 'operational' : 'no nodes online'
+                    : 'checking…'}
                 </span>
               </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-text-muted font-mono">mesh</span>
-              <span className="text-[10px] text-text-muted font-mono">WireGuard</span>
             </div>
           </div>
         </div>

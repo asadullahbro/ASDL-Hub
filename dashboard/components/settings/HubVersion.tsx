@@ -1,5 +1,9 @@
 'use client';
 
+import { RefreshCw } from 'lucide-react';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+
 import { useEffect, useState } from 'react';
 import { api, SystemVersion } from '@/lib/api';
 
@@ -35,33 +39,22 @@ export function HubVersion() {
   else if (v?.latest) status = "You're on the latest version.";
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="px-5 py-4 border-b border-border bg-surface">
-        <h2 className="text-sm font-medium text-text-primary">Hub version</h2>
-        <p className="text-xs text-text-muted mt-0.5">The Hub checks GitHub for new releases every hour.</p>
-      </div>
-      <div className="p-5 bg-background flex items-center justify-between gap-4">
-        <div className="text-xs space-y-1">
-          <div>
-            <span className="text-text-muted">Running </span>
-            <span className="font-mono text-text-primary">{v?.current ?? '…'}</span>
-            {v?.checked_at && !v.checked_at.startsWith('0001') && (
-              <span className="text-text-muted"> · last checked {new Date(v.checked_at).toLocaleString()}</span>
-            )}
-          </div>
-          <div className={v?.update_available ? 'text-accent' : v?.check_error ? 'text-status-yellow' : 'text-text-secondary'}>
-            {status}
-          </div>
-          {error && <div className="text-status-red">{error}</div>}
+    <Card
+      title="Hub version"
+      description="The Hub checks GitHub for new releases every hour."
+      actions={<Button icon={RefreshCw} loading={checking} onClick={check}>Check for updates</Button>}
+    >
+      <div className="text-sm space-y-1">
+        <div>
+          <span className="text-text-secondary">Running </span>
+          <span className="font-mono text-text-primary">{v?.current ?? '…'}</span>
+          {v?.checked_at && !v.checked_at.startsWith('0001') && (
+            <span className="text-text-secondary"> · last checked {new Date(v.checked_at).toLocaleString()}</span>
+          )}
         </div>
-        <button
-          onClick={check}
-          disabled={checking}
-          className="flex-shrink-0 text-xs font-medium border border-border text-text-primary px-3 py-1.5 rounded hover:bg-surface-hover disabled:opacity-50"
-        >
-          {checking ? 'Checking…' : 'Check for updates'}
-        </button>
+        <div className={`text-xs ${v?.update_available ? 'text-accent' : v?.check_error ? 'text-status-yellow' : 'text-text-secondary'}`}>{status}</div>
+        {error && <div className="text-xs text-status-red">{error}</div>}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -34,6 +34,7 @@ rollback() {
     if [ -n "${NODE_ID:-}" ] && [ "$NODE_ID" != "null" ]; then
         echo "   Notifying hub to remove node record..."
         curl -fsSL -X DELETE "${HUB_URL}/api/v1/enrollment/rollback/${NODE_ID}" \
+            -H "X-Enrollment-Token: ${ENROLLMENT_TOKEN:-}" \
             2>/dev/null || true
     fi
 

@@ -1,8 +1,15 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
+import { CheckCircle2, CircleDashed, LayoutDashboard, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Stats, Job, Node } from '@/types';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { Card, EmptyState, StatCard } from '@/components/ui/Card';
+import { JobStatusBadge } from '@/components/ui/Badge';
+import { jobTypeLabel } from '@/lib/labels';
 
 const POLL_INTERVAL = 10_000;
 
@@ -51,174 +58,108 @@ export default function DashboardPage() {
   }, [loadData]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted text-sm font-mono">Connecting to cluster...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-text-secondary">Loading…</div>;
   }
 
   if (error) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-status-red text-sm">{error}</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-status-red">{error}</div>;
   }
 
-  const recentJobs = jobs.slice(0, 8);
-
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-medium text-text-primary">Overview</h1>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 border border-border rounded-full text-xs text-text-secondary font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-green" />
-            mesh up
-          </div>
-          <button
-            onClick={handleManualRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 px-2.5 py-1 border border-border rounded-full text-xs text-text-secondary font-mono hover:text-text-primary transition-colors disabled:opacity-50"
-          >
-            <span className={refreshing ? 'animate-spin inline-block' : ''}>↻</span>
-            {refreshing ? 'syncing...' : 'just now'}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        icon={LayoutDashboard}
+        title="Overview"
+        description="Your nodes, apps and today's jobs at a glance."
+        actions={
+          <Button icon={RefreshCw} variant="ghost" loading={refreshing} onClick={handleManualRefresh}>
+            Refresh
+          </Button>
+        }
+      />
 
-      {/* Stat cards */}
       {stats && (
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
             label="Nodes online"
-            value={`${stats.onlineNodes}`}
-            suffix={`/${stats.nodes}`}
-            sub={`${stats.nodes - stats.onlineNodes} offline`}
+            value={`${stats.onlineNodes} / ${stats.nodes}`}
+            sub={stats.nodes - stats.onlineNodes > 0 ? `${stats.nodes - stats.onlineNodes} offline` : 'all online'}
+            tone={stats.onlineNodes < stats.nodes ? 'warning' : undefined}
           />
           <StatCard
             label="Projects"
-            value={`${stats.projects}`}
-            sub={`${stats.unhealthyProjects} unhealthy`}
-            valueClassName={stats.unhealthyProjects > 0 ? 'text-status-yellow' : undefined}
+            value={stats.projects}
+            sub={stats.unhealthyProjects > 0 ? `${stats.unhealthyProjects} unhealthy` : 'all healthy'}
+            tone={stats.unhealthyProjects > 0 ? 'danger' : undefined}
           />
-          <StatCard
-            label="Jobs today"
-            value={`${stats.jobs}`}
-            sub={`${stats.running} running · ${stats.pending} pending`}
-          />
+          <StatCard label="Jobs today" value={stats.jobs} sub={`${stats.running} running · ${stats.pending} waiting`} />
           <StatCard
             label="Failed today"
-            value={`${stats.failed}`}
-            sub={stats.failed > 0 ? 'needs attention' : 'all clear'}
-            valueClassName={stats.failed > 0 ? 'text-status-red' : undefined}
+            value={stats.failed}
+            sub={stats.failed > 0 ? 'needs a look' : 'all clear'}
+            tone={stats.failed > 0 ? 'danger' : undefined}
           />
         </div>
       )}
 
-      {/* Recent jobs */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium text-text-primary">Recent jobs</span>
-          <a href="/jobs" className="text-xs text-accent hover:underline">View all</a>
-        </div>
-        <div className="bg-surface border border-border rounded-lg divide-y divide-border">
-          {recentJobs.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-text-muted">No jobs yet</div>
-          ) : (
-            recentJobs.map((job) => (
+      <Card
+        title="Recent jobs"
+        flush
+        actions={
+          <Link href="/jobs" className="text-xs text-accent hover:underline">
+            View all
+          </Link>
+        }
+      >
+        {jobs.length === 0 ? (
+          <EmptyState>No jobs yet.</EmptyState>
+        ) : (
+          <div className="divide-y divide-border">
+            {jobs.slice(0, 8).map(job => (
               <JobRow key={job.id} job={job} nodeName={nodeNames[job.node_id]} />
-            ))
-          )}
-        </div>
-      </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
-
-function StatCard({
-  label,
-  value,
-  suffix,
-  sub,
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  suffix?: string;
-  sub?: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div className="bg-surface border border-border rounded-lg p-3.5">
-      <div className="text-xs text-text-muted mb-1.5">{label}</div>
-      <div className={`text-2xl font-medium leading-none ${valueClassName ?? 'text-text-primary'}`}>
-        {value}
-        {suffix && <span className="text-sm text-text-muted">{suffix}</span>}
-      </div>
-      {sub && <div className="text-xs text-text-muted font-mono mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-const jobTypeLabels: Record<string, string> = {
-  deploy: 'Deploy',
-  failover_stop: 'Remove old copy',
-  failover_start: 'Failover',
-  migrate_start: 'Migrate in',
-  migrate_stop: 'Migrate out',
-  image_pull: 'Pull image',
-  agent_update: 'Agent update',
-  command: 'Command',
-};
 
 // The app a job acts on, read from its docker command (e.g. --name 'api').
 function jobTarget(job: Job): string | undefined {
   const m =
     job.command?.match(/--name '([^']+)'/) ??
-    job.command?.match(/docker (?:rm -f|stop|start|restart) '?([\w.-]+)'?/);
+    job.command?.match(/docker (?:rm -f|stop|start|restart|logs[^']*) '?([\w.-]+)'?/);
   return m?.[1] ?? job.payload?.container_name ?? job.payload?.image;
 }
 
-function JobRow({ job, nodeName }: { job: Job; nodeName?: string }) {
-  const statusMap: Record<string, { label: string; className: string }> = {
-    completed: { label: 'done',      className: 'bg-green-500/10 text-status-green border border-green-500/20' },
-    running:   { label: 'running',   className: 'bg-accent/10 text-accent border border-accent/20' },
-    failed:    { label: 'failed',    className: 'bg-red-500/10 text-status-red border border-red-500/20' },
-    pending:   { label: 'pending',   className: 'bg-border text-text-muted border border-border' },
-    cancelled: { label: 'cancelled', className: 'bg-border text-text-muted border border-border' },
-  };
+const STATUS_ICON = {
+  completed: { icon: CheckCircle2, className: 'text-status-green' },
+  running: { icon: Loader2, className: 'text-status-blue animate-spin' },
+  failed: { icon: XCircle, className: 'text-status-red' },
+  pending: { icon: CircleDashed, className: 'text-text-muted' },
+  cancelled: { icon: CircleDashed, className: 'text-text-muted' },
+} as const;
 
-  const s = statusMap[job.status] ?? statusMap.pending;
+function JobRow({ job, nodeName }: { job: Job; nodeName?: string }) {
   const target = jobTarget(job);
-  const title = `${jobTypeLabels[job.type] ?? job.type}${target ? ` · ${target}` : ''}`;
-  const meta = nodeName ?? job.node_id.slice(0, 8);
+  const { icon: Icon, className } = STATUS_ICON[job.status] ?? STATUS_ICON.pending;
   const time = job.created_at
     ? new Date(job.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—';
-
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${
-        job.status === 'completed' ? 'bg-green-500/10' :
-        job.status === 'running'   ? 'bg-accent/10' :
-        job.status === 'failed'    ? 'bg-red-500/10' : 'bg-surface'
-      }`}>
-        <span className="text-xs">
-          {job.status === 'completed' ? '✓' :
-           job.status === 'running'   ? '↻' :
-           job.status === 'failed'    ? '✕' : '·'}
-        </span>
-      </div>
+    <Link href={`/jobs?id=${job.id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-surface-hover transition-colors">
+      <Icon className={`h-4 w-4 flex-shrink-0 ${className}`} />
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium text-text-primary truncate">{title}</div>
-        <div className="text-xs text-text-muted font-mono mt-0.5">{meta} · {time}</div>
+        <div className="text-sm text-text-primary truncate">
+          {jobTypeLabel(job.type)}
+          {target && <span className="text-text-secondary"> · {target}</span>}
+        </div>
+        <div className="text-xs text-text-secondary mt-0.5">
+          {nodeName ?? job.node_id.slice(0, 8)} · {time}
+        </div>
       </div>
-      <span className={`text-xs px-2 py-0.5 rounded-full font-mono flex-shrink-0 ${s.className}`}>
-        {s.label}
-      </span>
-    </div>
+      <JobStatusBadge status={job.status} />
+    </Link>
   );
 }

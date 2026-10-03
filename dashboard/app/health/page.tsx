@@ -3,6 +3,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Project, Node } from '@/types';
+import { Heart, RefreshCw } from 'lucide-react';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { StatusBadge } from '@/components/ui/Badge';
+import { Card, EmptyState, StatCard } from '@/components/ui/Card';
+import { tdClass, thClass } from '@/components/ui/Modal';
 
 interface HealthStatus {
   project_id: string;
@@ -14,12 +20,12 @@ interface HealthStatus {
 }
 
 export default function HealthPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [, setProjects] = useState<Project[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [healthStatuses, setHealthStatuses] = useState<HealthStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [checkingAll, setCheckingAll] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -72,164 +78,69 @@ export default function HealthPage() {
     }
   }
 
-  const getNodeName = (nodeId: string) => {
-    const node = nodes.find(n => n.id === nodeId);
-    return node ? node.hostname : 'Unknown';
-  };
+  const getNodeName = (nodeId: string) => nodes.find(n => n.id === nodeId)?.hostname ?? '—';
+  const count = (h: string) => healthStatuses.filter(x => x.health === h).length;
 
-  const getHealthBadge = (health: string) => {
-    switch (health) {
-      case 'healthy': return 'badge-completed';
-      case 'degraded': return 'badge-pending';
-      case 'unhealthy': return 'badge-failed';
-      default: return 'badge-pending';
-    }
-  };
-
-  const healthStats = {
-    total: healthStatuses.length,
-    healthy: healthStatuses.filter(h => h.health === 'healthy').length,
-    degraded: healthStatuses.filter(h => h.health === 'degraded').length,
-    unhealthy: healthStatuses.filter(h => h.health === 'unhealthy').length,
-    unknown: healthStatuses.filter(h => h.health === 'unknown').length,
-  };
-
-  const runHealthCheckAll = async () => {
-    setCheckingAll(true);
-    try {
-      for (const project of projects) {
-        await api.getProjectHealth(project.id);
-      }
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Health check failed');
-    } finally {
-      setCheckingAll(false);
-    }
+  const refresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted">Loading health status...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-text-secondary">Loading…</div>;
   }
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-status-red">{error}</div>
-      </div>
-    );
-  }
+  const online = nodes.filter(n => n.online).length;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text-primary">Health Status</h1>
-        <button
-          onClick={runHealthCheckAll}
-          disabled={checkingAll}
-          className="px-4 py-2 bg-accent text-black rounded-md text-sm font-medium hover:bg-accent-hover transition-colors disabled:opacity-50"
-        >
-          {checkingAll ? 'Checking...' : '🔄 Check All Health'}
-        </button>
+      <PageHeader
+        icon={Heart}
+        title="Health"
+        description="The Hub checks every app every 10 seconds. After three failed checks in a row, the app is moved to another node."
+        actions={<Button variant="ghost" icon={RefreshCw} loading={refreshing} onClick={refresh}>Refresh</Button>}
+      />
+
+      {error && <div className="text-sm text-status-red">{error}</div>}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Healthy apps" value={count('healthy')} tone={count('healthy') ? 'success' : undefined} />
+        <StatCard label="Degraded" value={count('degraded')} sub="failing checks, not moved yet" tone={count('degraded') ? 'warning' : undefined} />
+        <StatCard label="Unhealthy" value={count('unhealthy')} tone={count('unhealthy') ? 'danger' : undefined} />
+        <StatCard label="Nodes online" value={`${online} / ${nodes.length}`} tone={online < nodes.length ? 'warning' : undefined} />
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="stat-card text-center">
-          <div className="text-xl font-semibold text-status-green">{healthStats.healthy}</div>
-          <div className="text-xs text-text-muted">Healthy</div>
-        </div>
-        <div className="stat-card text-center">
-          <div className="text-xl font-semibold text-status-yellow">{healthStats.degraded}</div>
-          <div className="text-xs text-text-muted">Degraded</div>
-        </div>
-        <div className="stat-card text-center">
-          <div className="text-xl font-semibold text-status-red">{healthStats.unhealthy}</div>
-          <div className="text-xs text-text-muted">Unhealthy</div>
-        </div>
-        <div className="stat-card text-center">
-          <div className="text-xl font-semibold text-text-muted">{healthStats.unknown}</div>
-          <div className="text-xs text-text-muted">Unknown</div>
-        </div>
-      </div>
-
-      {healthStatuses.length === 0 ? (
-        <div className="bg-surface border border-border rounded-lg p-12 text-center">
-          <div className="text-text-muted">No projects to monitor</div>
-          <div className="text-sm text-text-secondary mt-2">
-            Deploy a project to see health status
-          </div>
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Project
-                </th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Health
-                </th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Node
-                </th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Last Check
-                </th>
-                <th className="text-right py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">
-                  Action
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {healthStatuses.map((status) => (
-                <tr key={status.project_id} className="hover:bg-surface-hover transition-colors">
-                  <td className="py-3 px-4 text-text-primary font-medium">
-                    {status.name}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className={`badge ${status.status === 'running' ? 'badge-completed' : 'badge-failed'}`}>
-                      {status.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className={`badge ${getHealthBadge(status.health)}`}>
-                      {status.health}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-text-secondary">
-                    {getNodeName(status.node_id)}
-                  </td>
-                  <td className="py-3 px-4 text-text-muted text-xs">
-                    {new Date(status.last_check).toLocaleString()}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() => {
-                        const project = projects.find(p => p.id === status.project_id);
-                        if (project) {
-                          api.getProjectHealth(project.id).then(() => loadData());
-                        }
-                      }}
-                      className="text-xs text-accent hover:text-accent-hover transition-colors"
-                    >
-                      Check Now
-                    </button>
-                  </td>
+      <Card title="Apps" flush>
+        {healthStatuses.length === 0 ? (
+          <EmptyState>No apps to check yet.</EmptyState>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className={thClass}>App</th>
+                  <th className={thClass}>Status</th>
+                  <th className={thClass}>Health</th>
+                  <th className={thClass}>Node</th>
+                  <th className={thClass}>Last check</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y divide-border">
+                {healthStatuses.map(st => (
+                  <tr key={st.project_id} className="hover:bg-surface-hover transition-colors">
+                    <td className={`${tdClass} text-text-primary`}>{st.name}</td>
+                    <td className={tdClass}><StatusBadge status={st.status} /></td>
+                    <td className={tdClass}><StatusBadge status={st.health} /></td>
+                    <td className={`${tdClass} text-text-secondary`}>{getNodeName(st.node_id)}</td>
+                    <td className={`${tdClass} text-text-secondary text-xs`}>{new Date(st.last_check).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

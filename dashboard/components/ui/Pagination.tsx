@@ -47,8 +47,8 @@ export function Pagination({
   };
 
   return (
-    <div className="flex items-center justify-between py-3 border-t border-border">
-      <div className="text-sm text-text-muted">
+    <div className="flex items-center justify-between">
+      <div className="text-xs text-text-secondary">
         {totalItems !== undefined && itemsPerPage && (
           <>
             Showing {((currentPage - 1) * itemsPerPage) + 1} -{' '}

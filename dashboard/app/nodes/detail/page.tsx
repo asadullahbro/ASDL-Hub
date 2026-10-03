@@ -6,6 +6,10 @@ import Link from 'next/link';
 import {
   ArrowLeft,
   Cpu,
+  RefreshCw,
+  Server,
+  SquareTerminal,
+  Trash2,
   HardDrive,
   MemoryStick,
   Wifi,
@@ -25,6 +29,11 @@ import { NodeApps } from '@/components/nodes/NodeApps';
 import { NodeConnection } from '@/components/nodes/NodeConnection';
 import { NodeMaintenance } from '@/components/nodes/NodeMaintenance';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { Badge, StatusBadge } from '@/components/ui/Badge';
+import { Card, EmptyState } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '—';
@@ -63,22 +72,6 @@ function scoreTextColor(score: number): string {
   if (score >= 80) return 'text-status-green';
   if (score >= 50) return 'text-status-yellow';
   return 'text-status-red';
-}
-
-function statusBadgeColor(status: string): string {
-  switch (status) {
-    case 'healthy':
-    case 'running':
-      return 'bg-status-green/10 text-status-green';
-    case 'degraded':
-      return 'bg-status-yellow/10 text-status-yellow';
-    case 'offline':
-    case 'failed':
-    case 'unhealthy':
-      return 'bg-status-red/10 text-status-red';
-    default:
-      return 'bg-surface-muted text-text-muted';
-  }
 }
 
 function getWifiIcon(signal: number) {
@@ -135,6 +128,23 @@ export default function NodeDetailPage() {
   const { user } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'operator';
   const [terminalNodeId, setTerminalNodeId] = useState<string | null>(null);
+  const isAdmin = user?.role === 'admin';
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const removeNode = async () => {
+    if (!node) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await api.removeNode(node.id);
+      router.push('/nodes');
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Could not remove the node');
+      setRemoving(false);
+    }
+  };
 
 
   const loadAll = useCallback(async () => {
@@ -167,25 +177,20 @@ export default function NodeDetailPage() {
   }, [loadAll]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-text-muted">Loading node...</div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-96 text-sm text-text-secondary">Loading…</div>;
   }
+
+  const back = (
+    <Link href="/nodes" className="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
+      <ArrowLeft className="h-4 w-4" /> Nodes
+    </Link>
+  );
 
   if (error || !node) {
     return (
       <div className="space-y-4">
-        <button
-          onClick={() => router.push('/nodes')}
-          className="flex items-center gap-1 text-sm text-text-muted hover:text-text-primary"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to nodes
-        </button>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-status-red">{error ?? 'Node not found'}</div>
-        </div>
+        {back}
+        <EmptyState><span className="text-status-red">{error ?? 'Node not found'}</span></EmptyState>
       </div>
     );
   }
@@ -195,157 +200,67 @@ export default function NodeDetailPage() {
   const wifiSignal = node.wifi_signal ?? 0;
   const pingLatency = node.ping_latency ?? 0;
   const WifiIcon = getWifiIcon(wifiSignal);
+  const state = !node.online ? 'offline' : node.maintenance ? 'maintenance' : 'online';
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => router.push('/nodes')}
-          className="flex items-center gap-1 text-sm text-text-muted hover:text-text-primary"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to nodes
-        </button>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setTerminalNodeId(node.id)}>
-          Terminal
-        </button>
-        <TerminalModal
-  nodeId={terminalNodeId}
-  onClose={() => setTerminalNodeId(null)}
-/>
-        <button
-          onClick={async () => {
-            await api.forceUpdateAgents();
-            alert('Update dispatched to all nodes');
-          }}
-          className="text-xs text-status-yellow hover:text-text-primary transition-colors"
-        >
-          ⬆ Force Update
-        </button>
-        <button
-          onClick={loadAll}
-          className="text-xs text-text-muted hover:text-text-primary transition-colors"
-        >
-          🔄 Refresh
-        </button>
-</div>
-      </div>
-
-      {/* Header */}
-      <div className="bg-surface border border-border rounded-lg p-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            {node.online ? (
-              <Wifi className="h-5 w-5 text-status-green" />
-            ) : (
-              <WifiOff className="h-5 w-5 text-status-red" />
+      {back}
+      <PageHeader
+        icon={node.online ? Wifi : WifiOff}
+        title={<span className="flex items-center gap-3">{node.hostname} <StatusBadge status={state} /></span>}
+        description={
+          <>
+            <span className="font-mono">{node.vpn_ip}</span> · {node.os} · {node.architecture} · agent {node.agent_version ?? 'unknown'} · last
+            heartbeat {formatRelativeTime(health?.last_heartbeat ?? node.last_heartbeat)}
+          </>
+        }
+        actions={
+          <>
+            <Button variant="ghost" icon={RefreshCw} onClick={loadAll}>Refresh</Button>
+            {canEdit && (
+              <Button icon={SquareTerminal} disabled={!node.online} onClick={() => setTerminalNodeId(node.id)}>
+                Terminal
+              </Button>
             )}
-            <div>
-              <h1 className="text-xl font-semibold text-text-primary">{node.hostname}</h1>
-              <div className="text-xs text-text-muted font-mono">{node.vpn_ip}</div>
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${statusBadgeColor(
-                node.online ? health?.status ?? node.status ?? 'unknown' : 'offline'
-              )}`}
-            >
-              {node.online ? health?.status ?? node.status ?? 'unknown' : 'offline'}
+          </>
+        }
+      />
+      <TerminalModal nodeId={terminalNodeId} onClose={() => setTerminalNodeId(null)} />
+
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 text-sm">
+          <Fact icon={Activity} label="Health">
+            <span className={scoreTextColor(healthScore)}>{healthScore} / 100</span>
+          </Fact>
+          <Fact icon={Cpu} label="CPU">{node.cpu_cores ?? node.cpu} cores</Fact>
+          <Fact icon={MemoryStick} label="Memory">{formatBytes(node.memory_used)} / {formatBytes(node.memory_total)}</Fact>
+          <Fact icon={HardDrive} label="Disk">{formatBytes(node.disk_used)} / {formatBytes(node.disk_total)}</Fact>
+          <Fact icon={Clock} label="Uptime">{formatUptime(node.uptime)}</Fact>
+          <Fact icon={Gauge} label="Ping to Hub">
+            <span className={node.online ? getLatencyColor(pingLatency) : 'text-text-muted'}>
+              {node.online && pingLatency > 0 ? `${pingLatency.toFixed(1)} ms (${getLatencyLabel(pingLatency)})` : '—'}
             </span>
-            <div className="flex items-center gap-1">
-              <Activity className="h-3 w-3 text-text-muted" />
-              <span className={`text-xs font-medium ${scoreTextColor(healthScore)}`}>
-                {healthScore}/100
-              </span>
-            </div>
-          </div>
+          </Fact>
+          {node.online && wifiSignal > 0 && (
+            <Fact icon={WifiIcon} label="WiFi">
+              <span className={getWifiColor(wifiSignal)}>{wifiSignal}%</span>
+            </Fact>
+          )}
         </div>
-
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div className="flex items-center gap-2 text-text-secondary">
-            <Cpu className="h-4 w-4" />
-            <span>{node.cpu_cores ?? node.cpu} cores</span>
-          </div>
-          <div className="flex items-center gap-2 text-text-secondary">
-            <MemoryStick className="h-4 w-4" />
-            <span>
-              {formatBytes(node.memory_used)} / {formatBytes(node.memory_total)}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-text-secondary">
-            <HardDrive className="h-4 w-4" />
-            <span>
-              {formatBytes(node.disk_used)} / {formatBytes(node.disk_total)}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-text-secondary">
-            <Clock className="h-4 w-4" />
-            <span>up {formatUptime(node.uptime)}</span>
-          </div>
-        </div>
-
-        {/* WiFi Signal */}
-        {node.online && wifiSignal > 0 && (
-          <div className="mt-3 flex items-center gap-2">
-            <WifiIcon className={`h-4 w-4 ${getWifiColor(wifiSignal)}`} />
-            <span className={`text-sm font-medium ${getWifiColor(wifiSignal)}`}>
-              WiFi: {wifiSignal}%
-            </span>
-            <div className="w-24 h-1.5 bg-surface-hover rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${getWifiColor(wifiSignal)}`}
-                style={{ width: `${Math.min(100, wifiSignal)}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {node.online && wifiSignal === 0 && (
-          <div className="mt-3 flex items-center gap-2 text-text-muted">
-            <WifiOff className="h-4 w-4" />
-            <span className="text-sm">No WiFi data</span>
-          </div>
-        )}
-
-        {/* Ping Latency */}
-        {node.online && (
-          <div className="mt-2 flex items-center gap-2">
-            <Gauge className={`h-4 w-4 ${getLatencyColor(pingLatency)}`} />
-            <span className={`text-sm font-medium ${getLatencyColor(pingLatency)}`}>
-              Ping: {pingLatency > 0 ? `${pingLatency.toFixed(1)}ms` : 'No data'}
-            </span>
-            <span className={`text-xs ${getLatencyColor(pingLatency)}`}>
-              ({getLatencyLabel(pingLatency)})
-            </span>
-          </div>
-        )}
-
-        <div className="mt-3 text-xs text-text-muted">
-         {node.os} · {node.architecture} · agent {node.agent_version ?? 'unknown'} · last heartbeat{' '}
-         {formatRelativeTime(health?.last_heartbeat ?? node.last_heartbeat)}
-        </div>
-
         {node.capabilities?.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border flex flex-wrap gap-1.5">
-            {node.capabilities.map((cap) => (
-              <span
-                key={cap}
-                className="px-2 py-0.5 bg-surface-hover rounded text-xs text-text-muted font-mono"
-              >
-                {cap}
-              </span>
+          <div className="mt-5 pt-4 border-t border-border flex flex-wrap gap-1.5">
+            {node.capabilities.map(cap => (
+              <Badge key={cap}>{cap}</Badge>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       <NodeMaintenance node={node} canEdit={canEdit} onChange={loadAll} />
       <NodeConnection nodeId={node.id} />
 
-      {/* Health breakdown */}
       {details && (
-        <div className="bg-surface border border-border rounded-lg p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-4">Health Breakdown</h2>
+        <Card title="Health breakdown">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {Object.entries(details).map(([key, value]) => (
               <div key={key}>
@@ -353,55 +268,86 @@ export default function NodeDetailPage() {
                   <span>{HEALTH_LABELS[key] ?? key}</span>
                   <span className={scoreTextColor(value)}>{value}</span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
-                  <div
-                    className={`h-full rounded-full ${scoreColor(value)}`}
-                    style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-                  />
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+                  <div className={`h-full rounded-full ${scoreColor(value)}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Projects on this node */}
-      <div className="bg-surface border border-border rounded-lg p-6">
-        <h2 className="text-sm font-semibold text-text-primary mb-4">
-          Projects ({projects.length})
-        </h2>
+      <Card icon={Server} title={`Projects on this node (${projects.length})`} flush>
         {projects.length === 0 ? (
-          <div className="text-sm text-text-muted">No projects on this node</div>
+          <EmptyState>No projects run here.</EmptyState>
         ) : (
-          <div className="space-y-2">
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                className="flex items-center justify-between p-3 rounded border border-border hover:border-text-muted transition-colors"
-              >
-                <div>
-                  <div className="text-sm font-medium text-text-primary">{project.name}</div>
-                  <div className="text-xs text-text-muted font-mono">{project.domain}</div>
+          <div className="divide-y divide-border">
+            {projects.map(project => (
+              <Link key={project.id} href="/projects" className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-surface-hover transition-colors">
+                <div className="min-w-0">
+                  <div className="text-sm text-text-primary">{project.name}</div>
+                  {project.domain && <div className="text-xs text-text-secondary font-mono truncate">{project.domain}</div>}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${statusBadgeColor(
-                      project.health_status
-                    )}`}
-                  >
-                    {project.health_status}
-                  </span>
-                  <span className="text-xs text-text-muted">{project.status}</span>
-                </div>
+                <StatusBadge status={project.health_status} />
               </Link>
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       <NodeApps nodeId={node.id} containers={node.containers ?? []} canEdit={canEdit} online={node.online} />
 
+      {isAdmin && (
+        <Card
+          icon={Trash2}
+          title="Remove this node"
+          description={
+            projects.length > 0
+              ? `Move ${projects.map(p => p.name).join(', ')} to another node first.`
+              : node.online
+                ? 'Forgets this node: its WireGuard access, keys and history. Its agent is cut off from the Hub; uninstall it on the machine.'
+                : 'Forgets this node: its WireGuard access, keys and history. Do this when the machine is gone for good.'
+          }
+          actions={
+            <Button variant="danger" icon={Trash2} disabled={projects.length > 0} onClick={() => setConfirmRemove(true)}>
+              Remove node
+            </Button>
+          }
+        />
+      )}
+
+      {confirmRemove && (
+        <Modal
+          title={`Remove ${node.hostname}?`}
+          size="sm"
+          onClose={() => setConfirmRemove(false)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</Button>
+              <Button variant="danger" icon={Trash2} loading={removing} onClick={removeNode}>Remove node</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-text-secondary">
+            The Hub forgets {node.hostname} ({node.vpn_ip}): its WireGuard access, SSH keys, heartbeat history and waiting jobs.
+            {node.online && ' It is online now, so its agent is cut off from the Hub; uninstall the agent on that machine afterwards.'} To use it
+            again later, add it as a new node.
+          </p>
+          {removeError && <div className="text-sm text-status-red">{removeError}</div>}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Fact({ icon: Icon, label, children }: { icon: typeof Cpu; label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="text-text-primary mt-1">{children}</div>
     </div>
   );
 }
