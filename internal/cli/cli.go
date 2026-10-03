@@ -25,6 +25,10 @@ Overview
 
 Apps
   deploy <app>                Redeploy an app with its current image
+  app set <app> key=value     Change domain, path, image, ports, node or description
+  env <app>                   An app's environment variable names
+  env set <app> KEY=VALUE     Set variables (encrypted; the app redeploys)
+  env unset <app> KEY         Remove variables
   move <app> <node>           Move an app to another node
   restart <app>               Restart an app's container
   logs <app> [-n lines]       An app's recent logs
@@ -38,6 +42,14 @@ Jobs and alerts
   job <id>                    A job's status and output
   notify                      Notification channels
   notify test <channel>       Send a test notification
+
+Hub server (run these on it, with sudo)
+  config                      The Hub's settings (/opt/asdl-hub/.env)
+  config set KEY=VALUE        Change settings, then restart the Hub
+  config unset KEY            Remove a setting
+  server status|restart|logs  The Hub's service; logs -f follows it
+  nginx reload                Rewrite app routes and reload nginx
+  nginx test|routes           Check nginx's config, or show the app routes
 
 Hub
   update                      Is a new release out?
@@ -124,6 +136,12 @@ func (e *env) run(cmd string, args []string) error {
 		return e.logout()
 	case "doctor":
 		return e.doctor()
+	case "config":
+		return e.config(args)
+	case "server", "service":
+		return e.server(args)
+	case "nginx":
+		return e.nginx(args)
 	}
 
 	c, err := newClient()
@@ -141,7 +159,15 @@ func (e *env) run(cmd string, args []string) error {
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err
 		}
+		if args[0] == "set" {
+			if err := needArgs(args, 2, "asdl-hub app set <app> key=value ..."); err != nil {
+				return err
+			}
+			return e.appSet(c, args[1], args[2:])
+		}
 		return e.app(c, args[0])
+	case "env":
+		return e.envCmd(c, args)
 	case "deploy", "redeploy":
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err
