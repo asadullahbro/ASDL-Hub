@@ -18,6 +18,7 @@ Usage: asdl-hub <command> [arguments]
 
 Overview
   status                      Hub version, nodes, apps and today's jobs
+  doctor                      Check everything and say what to fix
   nodes                       Nodes with their state, agent and resources
   apps                        Apps (projects): where they run and their health
   app <app>                   One app in detail, with its plugins
@@ -86,6 +87,9 @@ func Run(args []string, version string) int {
 	}
 	cmd, cmdArgs := rest[0], rest[1:]
 	if err := e.run(cmd, cmdArgs); err != nil {
+		if err == errSilent {
+			return 1
+		}
 		var ue usageError
 		if errors.As(err, &ue) {
 			fmt.Fprintf(os.Stderr, "asdl-hub %s: %s\nRun `asdl-hub help` for the commands.\n", cmd, ue.msg)
@@ -117,6 +121,8 @@ func (e *env) run(cmd string, args []string) error {
 		return e.login(args)
 	case "logout":
 		return e.logout()
+	case "doctor":
+		return e.doctor()
 	}
 
 	c, err := newClient()
