@@ -314,27 +314,33 @@ func (e *env) config(args []string) error {
 		fmt.Fprintln(e.out, v)
 		return nil
 	case "set", "unset":
-		if len(rest) == 0 {
-			return usageError{"expected asdl-hub config " + sub + " KEY" + map[bool]string{true: "=VALUE", false: ""}[sub == "set"] + " ..."}
+		existing := make([]string, 0, len(vals))
+		for k := range vals {
+			existing = append(existing, k)
 		}
-		changes := map[string]*string{}
-		for _, a := range rest {
-			k, v, ok := strings.Cut(a, "=")
-			if sub == "set" && !ok {
-				return usageError{fmt.Sprintf("%q: use KEY=VALUE", a)}
-			}
+		valid := func(k string) error {
 			if !envNameRe.MatchString(k) {
-				return usageError{fmt.Sprintf("%q isn't a setting name", k)}
-			}
-			if sub == "unset" {
-				changes[k] = nil
-			} else {
-				v := v
-				changes[k] = &v
+				return fmt.Errorf("%q isn't a setting name", k)
 			}
 			if s, known := settings[k]; known && s.risk != "" && !flags["--force"] {
 				return fmt.Errorf("changing %s is risky: %s. Add --force if you're sure", k, s.risk)
 			}
+			if sub == "unset" {
+				if _, ok := vals[k]; !ok {
+					return fmt.Errorf("%s isn't set", k)
+				}
+			}
+			return nil
+		}
+		changes, err := e.askChanges(sub, rest, existing, isSecretKey, "setting", valid)
+		if err != nil {
+			return err
+		}
+		if len(changes) == 0 {
+			fmt.Fprintln(e.out, "Nothing changed.")
+			return nil
+		}
+		for k := range changes {
 			if _, known := settings[k]; !known && !strings.HasPrefix(k, "WG_") {
 				fmt.Fprintf(e.out, "%s %s isn't a setting this Hub knows; it's saved anyway.\n", e.paint(yellow, "note:"), k)
 			}
@@ -503,30 +509,39 @@ func (e *env) envCmd(c *client, args []string) error {
 			keys[i] = v.Key
 		}
 		sort.Strings(keys)
-		fmt.Fprintf(e.out, "%s has %d environment variables (values are encrypted and never shown):\n", p.Name, len(keys))
+		fmt.Fprintf(e.out, "%s has %s (values are encrypted and never shown):\n", p.Name, plural(len(keys), "environment variable", "environment variables"))
 		for _, k := range keys {
 			fmt.Fprintln(e.out, "  "+k)
 		}
 		return nil
 	case "set", "unset":
-		changes := map[string]*string{}
-		for _, a := range args[1:] {
-			k, v, ok := strings.Cut(a, "=")
-			if sub == "set" && !ok {
-				return usageError{fmt.Sprintf("%q: use KEY=VALUE", a)}
-			}
+		names := make([]string, len(vars))
+		have := map[string]bool{}
+		for i, v := range vars {
+			names[i] = v.Key
+			have[v.Key] = true
+		}
+		valid := func(k string) error {
 			if !envNameRe.MatchString(k) {
-				return usageError{fmt.Sprintf("%q isn't a valid variable name", k)}
+				return fmt.Errorf("%q isn't a valid variable name (letters, digits and _)", k)
 			}
-			if sub == "set" {
-				v := v
-				changes[k] = &v
-			} else {
-				changes[k] = nil
+			if sub == "unset" && !have[k] {
+				return fmt.Errorf("%s has no %s", p.Name, k)
 			}
+			return nil
+		}
+		// Every value is a secret: the Hub encrypts them all.
+		changes, err := e.askChanges(sub, args[1:], names, func(string) bool { return true }, "variable", valid)
+		if err != nil {
+			return err
 		}
 		if len(changes) == 0 {
-			return usageError{"expected at least one variable"}
+			fmt.Fprintln(e.out, "Nothing changed.")
+			return nil
+		}
+		if !e.confirm(fmt.Sprintf("%s for %s, then redeploy it?", strings.ToUpper(changeNames(changes)[:1])+changeNames(changes)[1:], p.Name)) {
+			fmt.Fprintln(e.out, "Nothing changed.")
+			return nil
 		}
 		// The API returns values masked; sending a masked value keeps it.
 		var out []envVar

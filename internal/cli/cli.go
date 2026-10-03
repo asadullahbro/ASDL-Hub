@@ -27,8 +27,9 @@ Apps
   deploy <app>                Redeploy an app with its current image
   app set <app> key=value     Change domain, path, image, ports, node or description
   env <app>                   An app's environment variable names
-  env set <app> KEY=VALUE     Set variables (encrypted; the app redeploys)
-  env unset <app> KEY         Remove variables
+  env set <app> [KEY]         Add or change variables; values are asked for
+                              at a hidden prompt (the app redeploys)
+  env unset <app> [KEY]       Remove variables
   move <app> <node>           Move an app to another node
   restart <app>               Restart an app's container
   logs <app> [-n lines]       An app's recent logs
@@ -45,8 +46,9 @@ Jobs and alerts
 
 Hub server (run these on it, with sudo)
   config                      The Hub's settings (/opt/asdl-hub/.env)
-  config set KEY=VALUE        Change settings, then restart the Hub
-  config unset KEY            Remove a setting
+  config set [KEY]            Change settings (asked for; secrets hidden),
+                              then restart the Hub
+  config unset [KEY]          Remove a setting
   server status|restart|logs  The Hub's service; logs -f follows it
   nginx reload                Rewrite app routes and reload nginx
   nginx test|routes           Check nginx's config, or show the app routes
