@@ -225,7 +225,7 @@ export default function NodeDetailPage() {
           </>
         }
       />
-      <TerminalModal nodeId={terminalNodeId} onClose={() => setTerminalNodeId(null)} />
+      <TerminalModal nodeId={terminalNodeId} nodeName={node.hostname} onClose={() => setTerminalNodeId(null)} />
 
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 text-sm">
