@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"golang.org/x/term"
 
 	"github.com/asdl/hub/internal/api/handlers"
 	"github.com/asdl/hub/internal/api/middleware"
@@ -49,6 +50,25 @@ func main() {
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
+		// Someone typed "asdl-hub serve" in a terminal outside the Hub's
+		// folder: explain instead of trying the default database password.
+		if os.Getenv("DB_PASSWORD") == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprint(os.Stderr, `asdl-hub serve runs the Hub server, and reads its settings from .env in the
+current folder. There is none here.
+
+The installed Hub already runs as a service (settings in /opt/asdl-hub/.env):
+  systemctl status asdl-hub        is it running?
+  sudo asdl-hub status             what it's doing
+  journalctl -u asdl-hub -f        its log
+
+To run it by hand instead, stop the service first:
+  sudo systemctl stop asdl-hub
+  cd /opt/asdl-hub && sudo -u asdl-hub ./bin/asdl-hub serve
+
+For the command line, run: asdl-hub help
+`)
+			os.Exit(1)
+		}
 		log.Println("⚠️  No .env file found, using environment variables")
 	}
 
