@@ -176,7 +176,13 @@ check_existing_agent() {
 # STEP 3: Collect enrollment info
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 collect_info() {
-    read -p "Enter enrollment token: " ENROLLMENT_TOKEN </dev/tty
+    read -r -p "Enter enrollment token: " ENROLLMENT_TOKEN </dev/tty
+    # Strip whitespace and stray carriage returns picked up when pasting
+    ENROLLMENT_TOKEN=$(printf '%s' "$ENROLLMENT_TOKEN" | tr -d '[:space:]')
+    if [ -z "$ENROLLMENT_TOKEN" ]; then
+        echo "No enrollment token entered."
+        exit 1
+    fi
 
     echo ""
     echo "Enrollment info:"
@@ -249,7 +255,8 @@ gather_system_info() {
         darwin)
             CPU=$(sysctl -n hw.ncpu)
             MEMORY=$(sysctl -n hw.memsize)
-            DISK=$(df -B1 / | awk 'NR==2{print $2}')
+            # BSD df has no -B1; -k reports 1024-byte blocks
+            DISK=$(df -k / | awk 'NR==2{print $2 * 1024}')
             ;;
     esac
 
@@ -265,20 +272,35 @@ enroll_with_hub() {
     echo ""
     echo "Enrolling with hub..."
 
-    RESPONSE=$(curl -fsSL -X POST "${HUB_URL}/api/v1/enrollment/enroll" \
+    # Build the body with jq so values are escaped and numbers are never empty
+    ENROLL_BODY=$(jq -n \
+        --arg token "$ENROLLMENT_TOKEN" \
+        --arg hostname "$HOSTNAME" \
+        --arg wg_key "$WG_PUBLIC_KEY" \
+        --arg os "$OS" \
+        --arg arch "$ARCH" \
+        --arg ssh_user "$SSH_USER" \
+        --argjson cpu "${CPU:-0}" \
+        --argjson memory "${MEMORY:-0}" \
+        --argjson disk "${DISK:-0}" \
+        '{token: $token, hostname: $hostname, wireguard_public_key: $wg_key,
+          os: $os, arch: $arch, cpu: $cpu, memory_total: $memory,
+          disk_total: $disk, capabilities: ["docker"], ssh_user: $ssh_user}')
+
+    # No -f here: on an error we want the hub's message, not just the status code
+    HTTP_CODE=$(curl -sSL -o /tmp/asdl-enroll-response -w '%{http_code}' \
+        -X POST "${HUB_URL}/api/v1/enrollment/enroll" \
         -H "Content-Type: application/json" \
-        -d "{
-            \"token\": \"${ENROLLMENT_TOKEN}\",
-            \"hostname\": \"${HOSTNAME}\",
-            \"wireguard_public_key\": \"${WG_PUBLIC_KEY}\",
-            \"os\": \"${OS}\",
-            \"arch\": \"${ARCH}\",
-            \"cpu\": ${CPU},
-            \"memory_total\": ${MEMORY},
-            \"disk_total\": ${DISK},
-            \"capabilities\": [\"docker\"],
-            \"ssh_user\": \"${SSH_USER}\"
-        }")
+        -d "$ENROLL_BODY") || HTTP_CODE="000"
+    RESPONSE=$(cat /tmp/asdl-enroll-response 2>/dev/null || true)
+    rm -f /tmp/asdl-enroll-response
+
+    if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "200" ]; then
+        echo "Enrollment failed (HTTP ${HTTP_CODE})."
+        ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error // empty' 2>/dev/null || true)
+        echo "   ${ERROR_MSG:-$RESPONSE}"
+        exit 1
+    fi
 
     NODE_ID=$(echo "$RESPONSE" | jq -r '.node_id')
     ASSIGNED_IP=$(echo "$RESPONSE" | jq -r '.assigned_ip')

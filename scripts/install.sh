@@ -567,6 +567,7 @@ install_files() {
     # and request certificates for the routes it writes, without a password.
     cat > /etc/sudoers.d/asdl-hub.tmp <<EOF
 $RUN_USER ALL=(root) NOPASSWD: /usr/bin/wg, /usr/sbin/ip
+$RUN_USER ALL=(root) NOPASSWD: /usr/bin/wg-quick save $WG_INTERFACE
 $RUN_USER ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/bin/systemctl reload nginx
 $RUN_USER ALL=(root) NOPASSWD: /usr/local/lib/asdl-hub/issue-cert
 $RUN_USER ALL=(root) NOPASSWD: $UPGRADE_HELPER

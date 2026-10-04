@@ -468,10 +468,11 @@ func (s *NodeService) StartOfflineSweeper() {
 }
 
 // Remove handles DELETE /nodes/:id: forgets a node for good. Its WireGuard
-// peer is removed (so an agent still running there is cut off), and so are
-// its keys, history and waiting jobs. A node that still runs apps can't be
-// removed; move them first.
-func (s *NodeService) Remove(c *gin.Context, removePeer func(publicKey string) error) {
+// peers are removed (so an agent still running there is cut off), and so is
+// everything recorded against it: SSH keys, enrollment token, containers,
+// heartbeats and jobs. A node that still runs apps can't be removed; move
+// them first.
+func (s *NodeService) Remove(c *gin.Context, removePeers func(publicKey, vpnIP string) error) {
 	var node models.Node
 	if err := s.db.First(&node, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
@@ -488,19 +489,22 @@ func (s *NodeService) Remove(c *gin.Context, removePeer func(publicKey string) e
 	}
 
 	var peer models.WireGuardPeer
-	if err := s.db.Where("node_id = ?", node.ID).First(&peer).Error; err == nil {
-		if removePeer != nil {
-			if err := removePeer(peer.PublicKey); err != nil {
-				log.Printf("⚠️ Removing node %s: WireGuard peer: %v", node.Hostname, err)
-			}
+	s.db.Where("node_id = ?", node.ID).First(&peer)
+	if removePeers != nil {
+		if err := removePeers(peer.PublicKey, node.VPNIP); err != nil {
+			log.Printf("⚠️ Removing node %s: WireGuard peer: %v", node.Hostname, err)
 		}
-		s.db.Delete(&peer)
 	}
+	s.db.Delete(&models.WireGuardPeer{}, "node_id = ?", node.ID)
 	s.db.Delete(&models.NodeSSHKey{}, "node_id = ?", node.ID)
+	s.db.Delete(&models.EnrollmentToken{}, "used_by = ?", node.ID)
+	s.db.Unscoped().Delete(&models.Container{}, "node_id = ?", node.ID)
 	s.db.Delete(&models.Heartbeat{}, "node_id = ?", node.ID)
-	s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).Delete(&models.Job{})
+	s.db.Unscoped().Delete(&models.Job{}, "node_id = ?", node.ID)
 	s.db.Delete(&models.Setting{}, "key = ? AND value = ?", "master_node_id", node.ID)
-	if err := s.db.Delete(&node).Error; err != nil {
+	// Unscoped: a soft-deleted row would keep holding its VPN IP under the
+	// unique index, and the next enrollment given that IP would fail.
+	if err := s.db.Unscoped().Delete(&node).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

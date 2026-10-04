@@ -62,7 +62,11 @@ func (h *EnrollmentHandlers) Enroll(c *gin.Context) {
 	}
 	resp, err := h.enrollment.Enroll(req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, services.ErrInvalidEnrollmentToken) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusCreated, resp)

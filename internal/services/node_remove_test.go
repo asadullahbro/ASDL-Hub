@@ -15,7 +15,7 @@ import (
 func TestRemoveNode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testutil.NewDB(t, &models.Node{}, &models.Project{}, &models.WireGuardPeer{}, &models.NodeSSHKey{},
-		&models.Heartbeat{}, &models.Job{}, &models.Setting{})
+		&models.Heartbeat{}, &models.Job{}, &models.Setting{}, &models.EnrollmentToken{}, &models.Container{})
 	db.Create(&models.Node{ID: "busy", Hostname: "busy", VPNIP: "10.0.0.2"})
 	db.Create(&models.Node{ID: "old", Hostname: "old", VPNIP: "10.0.0.3"})
 	db.Create(&models.Project{ID: "p1", Name: "api", NodeID: "busy"})
@@ -23,12 +23,15 @@ func TestRemoveNode(t *testing.T) {
 	db.Create(&models.Job{ID: "j1", NodeID: "old", Status: models.JobStatusPending, CreatedAt: time.Now()})
 	db.Create(&models.Job{ID: "j2", NodeID: "old", Status: models.JobStatusCompleted, CreatedAt: time.Now()})
 	db.Create(&models.Setting{Key: "master_node_id", Value: "old"})
+	db.Create(&models.NodeSSHKey{ID: "k1", NodeID: "old", PublicKey: "ssh-pub", PrivateKey: "enc"})
+	db.Create(&models.EnrollmentToken{ID: "t1", Token: "tok", UsedBy: "old", ExpiresAt: time.Now()})
+	db.Create(&models.Container{ID: "c1", NodeID: "old", Name: "web"})
 
 	s := NewNodeService(db)
 	var removed []string
 	r := gin.New()
 	r.DELETE("/nodes/:id", func(c *gin.Context) {
-		s.Remove(c, func(pk string) error { removed = append(removed, pk); return nil })
+		s.Remove(c, func(pk, ip string) error { removed = append(removed, pk+"@"+ip); return nil })
 	})
 	do := func(id string) int {
 		w := httptest.NewRecorder()
@@ -44,12 +47,25 @@ func TestRemoveNode(t *testing.T) {
 	}
 	var n int64
 	db.Model(&models.Node{}).Where("id = ?", "old").Count(&n)
-	if n != 0 || len(removed) != 1 || removed[0] != "pk-old" {
+	if n != 0 || len(removed) != 1 || removed[0] != "pk-old@10.0.0.3" {
 		t.Errorf("node left: %d, peers removed: %v", n, removed)
 	}
-	db.Model(&models.Job{}).Where("node_id = ?", "old").Count(&n)
-	if n != 1 {
-		t.Errorf("want only the finished job kept, have %d", n)
+	db.Unscoped().Model(&models.Node{}).Where("id = ?", "old").Count(&n)
+	if n != 0 {
+		t.Error("node only soft-deleted; its VPN IP stays taken")
+	}
+	for name, model := range map[string]any{
+		"jobs": &models.Job{}, "SSH keys": &models.NodeSSHKey{}, "containers": &models.Container{},
+		"WireGuard peers": &models.WireGuardPeer{},
+	} {
+		db.Unscoped().Model(model).Where("node_id = ?", "old").Count(&n)
+		if n != 0 {
+			t.Errorf("%s left for removed node: %d", name, n)
+		}
+	}
+	db.Model(&models.EnrollmentToken{}).Where("used_by = ?", "old").Count(&n)
+	if n != 0 {
+		t.Error("enrollment token still points at the removed node")
 	}
 	db.Model(&models.Setting{}).Where("key = ?", "master_node_id").Count(&n)
 	if n != 0 {
