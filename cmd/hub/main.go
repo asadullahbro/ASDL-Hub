@@ -272,8 +272,9 @@ For the command line, run: asdl-hub help
 				hubURL = fmt.Sprintf("http://localhost:%s", hubPort)
 			}
 
-			// 3. Inject the URL by replacing %s with the actual URL
-			script := strings.ReplaceAll(string(scriptBytes), "%s", hubURL)
+			// 3. Inject the URL into the HUB_URL placeholder only; the script
+			// uses %s elsewhere (printf, stat -f '%Su') which must stay intact
+			script := strings.Replace(string(scriptBytes), `HUB_URL="%s"`, `HUB_URL="`+hubURL+`"`, 1)
 
 			// 4. Serve the final script
 			c.Header("Content-Type", "text/plain")
@@ -576,7 +577,7 @@ echo "Agent updated successfully"
 
 		// Admin only - forget a node (its apps must have moved off it)
 		protected.DELETE("/nodes/:id", middleware.RequireRole(models.RoleAdmin), func(c *gin.Context) {
-			nodeService.Remove(c, wireGuardService.RemovePeer)
+			nodeService.Remove(c, wireGuardService.RemoveNodePeers)
 		})
 
 		// Admin only - Enrollment token management

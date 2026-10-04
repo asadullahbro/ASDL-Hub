@@ -72,7 +72,7 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 	var token models.EnrollmentToken
 	if err := s.db.Where("token = ? AND used = ? AND expires_at > ?",
 		req.Token, false, time.Now()).First(&token).Error; err != nil {
-		return nil, errors.New("invalid or expired enrollment token")
+		return nil, ErrInvalidEnrollmentToken
 	}
 
 	// Allocate WireGuard IP
@@ -85,6 +85,13 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 	if err := s.wireGuard.AddPeer(req.WireGuardPublicKey, assignedIP); err != nil {
 		return nil, err
 	}
+	enrolled := false
+	defer func() {
+		if !enrolled {
+			// Don't leave a live peer behind for a node the hub doesn't know
+			s.wireGuard.RemovePeer(req.WireGuardPublicKey)
+		}
+	}()
 
 	// Store WireGuard peer
 	peer := &models.WireGuardPeer{
@@ -107,12 +114,6 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		log.Printf("⚠️ SSH key encryption failed: %v", err)
 	}
 
-	// Mark token as used
-	now := time.Now()
-	token.Used = true
-	token.UsedAt = &now
-	s.db.Save(&token)
-
 	// Create node record
 	node := &models.Node{
 		ID:            uuid.New().String(),
@@ -131,10 +132,16 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		return nil, err
 	}
 
-	peer.NodeID = node.ID
-	s.db.Create(peer)
+	// Only use up the token once the node exists, so a failed enrollment
+	// can be retried with the same token
+	now := time.Now()
+	token.Used = true
+	token.UsedAt = &now
 	token.UsedBy = node.ID
 	s.db.Save(&token)
+
+	peer.NodeID = node.ID
+	s.db.Create(peer)
 
 	// Store SSH key
 	if encryptedPriv != "" && pubAuth != "" {
@@ -150,6 +157,7 @@ func (s *EnrollmentService) Enroll(req EnrollRequest) (*EnrollResponse, error) {
 		s.db.Create(sshKey)
 	}
 
+	enrolled = true
 	log.Printf("✅ Node enrolled: %s assigned %s", req.Hostname, assignedIP)
 
 	return &EnrollResponse{
@@ -248,8 +256,8 @@ func (s *EnrollmentService) Rollback(nodeID, enrollToken string) error {
 	// Get the peer public key before deleting
 	var peer models.WireGuardPeer
 	if err := s.db.Where("node_id = ?", nodeID).First(&peer).Error; err == nil {
-		// Remove from WireGuard
-		s.wireGuard.RemovePeer(peer.PublicKey)
+		// Remove from WireGuard, along with any stray peer on the same IP
+		s.wireGuard.RemoveNodePeers(peer.PublicKey, peer.AssignedIP)
 		// Delete peer record
 		s.db.Delete(&peer)
 	}
@@ -257,12 +265,15 @@ func (s *EnrollmentService) Rollback(nodeID, enrollToken string) error {
 	// Delete SSH keys
 	s.db.Delete(&models.NodeSSHKey{}, "node_id = ?", nodeID)
 
-	// Delete node
-	s.db.Delete(&models.Node{}, "id = ?", nodeID)
+	// Delete node (Unscoped so its VPN IP is free again)
+	s.db.Unscoped().Delete(&models.Node{}, "id = ?", nodeID)
 
 	log.Printf("↩️  Enrollment rolled back for node: %s", nodeID)
 	return nil
 }
+
+// ErrInvalidEnrollmentToken means the token is unknown, used or expired.
+var ErrInvalidEnrollmentToken = errors.New("invalid or expired enrollment token")
 
 // ErrRollbackDenied means the rollback didn't come from the node's installer.
 var ErrRollbackDenied = errors.New("only the installer that enrolled this node can roll it back, within an hour")
