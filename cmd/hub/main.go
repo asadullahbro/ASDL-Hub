@@ -26,7 +26,10 @@ type Config struct {
 	Server struct {
 		Port        int      `yaml:"port"`
 		VPNNetworks []string `yaml:"vpn_networks"`
-		HubURL      string
+		// Peers whose X-Forwarded-For / X-Real-IP the Hub believes: the nginx
+		// in front of it. Anyone else's headers are ignored.
+		TrustedProxies []string `yaml:"trusted_proxies"`
+		HubURL         string
 	} `yaml:"server"`
 	Database struct {
 		Host     string `yaml:"host"`
@@ -190,6 +193,12 @@ For the command line, run: asdl-hub help
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	// Without this Gin believes X-Forwarded-For from anyone, so the mesh-only
+	// routes and node identity (both read the client address) could be faked
+	// from the internet.
+	if err := middleware.TrustOnlyProxies(router, cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("invalid TRUSTED_PROXIES %v: %v", cfg.Server.TrustedProxies, err)
+	}
 	// Nodes poll these every few seconds; logging them would bury
 	// everything else.
 	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
@@ -683,6 +692,7 @@ func loadConfig() *Config {
 	// Server config from env
 	cfg.Server.Port = getEnvAsInt("SERVER_PORT", 8080)
 	cfg.Server.VPNNetworks = getEnvAsStringSlice("VPN_NETWORKS", []string{"10.100.0.0/24", "127.0.0.0/8", "::1/128"})
+	cfg.Server.TrustedProxies = getEnvAsStringSlice("TRUSTED_PROXIES", []string{"127.0.0.1", "::1"})
 	cfg.Server.HubURL = getEnv("HUB_URL", getEnv("PUBLIC_URL", ""))
 
 	// Database config from env
