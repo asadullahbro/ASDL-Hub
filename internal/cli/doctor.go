@@ -214,6 +214,8 @@ func (e *env) doctorNodes(r *report, c *client, nodes []node, apps []project) {
 		var conn struct {
 			WGHandshake *time.Time `json:"wg_handshake"`
 			WGError     string     `json:"wg_error"`
+			SSHPort     int        `json:"ssh_port"`
+			SSHError    string     `json:"ssh_error"`
 		}
 		_ = c.do("GET", "/nodes/"+n.ID+"/connection", nil, &conn)
 		problems := []string{}
@@ -221,6 +223,10 @@ func (e *env) doctorNodes(r *report, c *client, nodes []node, apps []project) {
 		if conn.WGHandshake != nil && !conn.WGHandshake.IsZero() && time.Since(*conn.WGHandshake) > 3*time.Minute {
 			problems = append(problems, "WireGuard handshake "+ago(*conn.WGHandshake))
 			fixes = append(fixes, "On "+n.Hostname+": sudo wg show; check the Hub's UDP port is open in its cloud firewall")
+		}
+		if conn.SSHError != "" {
+			problems = append(problems, "terminal won't open: "+conn.SSHError)
+			fixes = append(fixes, terminalFix(n, conn.SSHPort, conn.SSHError))
 		}
 		if n.Maintenance {
 			problems = append(problems, "in maintenance")
@@ -243,6 +249,21 @@ func (e *env) doctorNodes(r *report, c *client, nodes []node, apps []project) {
 	if online == 1 && len(apps) > 0 {
 		r.add(levelWarn, "Only one node is online, so apps have nowhere to fail over to")
 	}
+}
+
+// terminalFix says how to make a node's web terminal work: it needs an SSH
+// server on the node (Ubuntu desktops don't ship one) answering on the VPN.
+func terminalFix(n node, port int, problem string) string {
+	if strings.HasPrefix(problem, "no SSH key") {
+		return "The node was enrolled without terminal access; re-run the installer on " + n.Hostname + " to add it"
+	}
+	if strings.Contains(problem, "timed out") {
+		return fmt.Sprintf("On %s: allow port %d from the VPN in its firewall (sudo ufw allow in on <its asdl-* interface> to any port %d)", n.Hostname, port, port)
+	}
+	if n.OS == "darwin" {
+		return "On " + n.Hostname + ": System Settings → General → Sharing → turn on Remote Login"
+	}
+	return "On " + n.Hostname + ": sudo apt install -y openssh-server && sudo systemctl enable --now ssh (dnf: openssh-server, sshd)"
 }
 
 func (e *env) doctorApps(r *report, nodes []node, apps []project) {

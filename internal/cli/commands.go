@@ -17,6 +17,7 @@ type node struct {
 	ID               string     `json:"id"`
 	Hostname         string     `json:"hostname"`
 	VPNIP            string     `json:"vpn_ip"`
+	OS               string     `json:"os"`
 	Online           bool       `json:"online"`
 	Maintenance      bool       `json:"maintenance"`
 	AgentVersion     string     `json:"agent_version"`

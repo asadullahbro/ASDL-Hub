@@ -3,8 +3,10 @@ package services
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -227,7 +229,37 @@ func (s *NodeOpsService) Connection(c *gin.Context) {
 	} else if t, ok := hs[node.VPNIP]; ok {
 		resp["wg_handshake"] = t
 	}
+	if node.Online {
+		resp["ssh_port"], resp["ssh_error"] = s.terminalReachable(node)
+	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// terminalReachable checks the Hub can open the node's web terminal: the
+// node needs the SSH key from enrollment and an SSH server answering on its
+// VPN address. Returns the port and why it can't connect ("" if it can).
+func (s *NodeOpsService) terminalReachable(node models.Node) (int, string) {
+	var key models.NodeSSHKey
+	if err := s.db.Where("node_id = ?", node.ID).First(&key).Error; err != nil {
+		return 0, "no SSH key for this node"
+	}
+	port := key.SSHPort
+	if port == 0 {
+		port = 22
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(node.VPNIP, strconv.Itoa(port)), 3*time.Second)
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Timeout() {
+			return port, "SSH port doesn't answer (timed out)"
+		}
+		if strings.Contains(err.Error(), "refused") {
+			return port, "no SSH server listening (connection refused)"
+		}
+		return port, err.Error()
+	}
+	conn.Close()
+	return port, ""
 }
 
 // wireGuardHandshakes maps each peer's VPN address to its last handshake,

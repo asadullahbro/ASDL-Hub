@@ -64,3 +64,23 @@ func TestDoctor_FindsProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalFix(t *testing.T) {
+	linux := node{Hostname: "laptop", OS: "linux"}
+	mac := node{Hostname: "mbp", OS: "darwin"}
+	cases := []struct {
+		n       node
+		problem string
+		want    string
+	}{
+		{linux, "no SSH server listening (connection refused)", "sudo apt install -y openssh-server"},
+		{mac, "no SSH server listening (connection refused)", "Remote Login"},
+		{linux, "SSH port doesn't answer (timed out)", "ufw allow"},
+		{linux, "no SSH key for this node", "re-run the installer"},
+	}
+	for _, c := range cases {
+		if got := terminalFix(c.n, 22, c.problem); !strings.Contains(got, c.want) || !strings.Contains(got, c.n.Hostname) {
+			t.Errorf("%s / %q: %q, want it to mention %q", c.n.OS, c.problem, got, c.want)
+		}
+	}
+}
