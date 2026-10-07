@@ -200,11 +200,11 @@ install_dependencies() {
     case "$OS" in
         linux)
             if command -v apt-get &>/dev/null; then
-                apt-get update -qq && apt-get install -y -qq wireguard wireguard-tools curl jq
+                apt-get update -qq && apt-get install -y -qq wireguard wireguard-tools curl jq openssh-server
             elif command -v dnf &>/dev/null; then
-                dnf install -y -q wireguard-tools curl jq
+                dnf install -y -q wireguard-tools curl jq openssh-server
             elif command -v yum &>/dev/null; then
-                yum install -y -q wireguard-tools curl jq
+                yum install -y -q wireguard-tools curl jq openssh-server
             else
                 echo "No supported package manager found (apt, dnf, yum)"
                 exit 1
@@ -225,7 +225,29 @@ install_dependencies() {
             ;;
     esac
 
+    enable_ssh_server
     echo "Dependencies installed"
+}
+
+# The Hub's web terminal reaches the node over SSH on its VPN address, with
+# the key added in step 8. Desktop installs (Ubuntu desktop, macOS) don't run
+# an SSH server by default.
+enable_ssh_server() {
+    case "$OS" in
+        linux)
+            # Ubuntu/Debian call it ssh (socket-activated on newer Ubuntu), Fedora/RHEL sshd
+            systemctl enable --now ssh.socket 2>/dev/null \
+                || systemctl enable --now ssh 2>/dev/null \
+                || systemctl enable --now sshd 2>/dev/null \
+                || echo "   Could not start the SSH server; the Hub's terminal won't open until it runs"
+            ;;
+        darwin)
+            if ! sudo systemsetup -getremotelogin 2>/dev/null | grep -q ": On"; then
+                sudo systemsetup -f -setremotelogin on >/dev/null 2>&1 \
+                    || echo "   Turn on Remote Login (System Settings → General → Sharing) for the Hub's terminal"
+            fi
+            ;;
+    esac
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
