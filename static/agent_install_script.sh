@@ -340,7 +340,6 @@ enroll_with_hub() {
     fi
 
     echo "Enrolled!"
-    echo "   Node ID:     $NODE_ID"
     echo "   Assigned IP: $ASSIGNED_IP"
 }
 
@@ -422,7 +421,6 @@ save_agent_config() {
             mkdir -p "/etc/asdl/${HUB_SLUG}"
             cat > "/etc/asdl/${HUB_SLUG}/agent.conf" << EOF
 hub_url: http://${HUB_VPN_IP}:${HUB_PORT}
-node_id: ${NODE_ID}
 vpn_ip: ${ASSIGNED_IP}
 enrolled: true
 interval: 30s
@@ -437,7 +435,6 @@ EOF
             sudo mkdir -p "/usr/local/etc/asdl/${HUB_SLUG}"
             sudo tee "/usr/local/etc/asdl/${HUB_SLUG}/agent.conf" > /dev/null << EOF
 hub_url: http://${HUB_VPN_IP}:${HUB_PORT}
-node_id: ${NODE_ID}
 vpn_ip: ${ASSIGNED_IP}
 enrolled: true
 interval: 30s
@@ -644,7 +641,6 @@ echo "╔═══════════════════════�
 echo "║         Enrollment Complete!         ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
-echo "   Node ID:    ${NODE_ID}"
 echo "   VPN IP:     ${ASSIGNED_IP}"
 echo "   Hub:        http://${HUB_VPN_IP}:${HUB_PORT}"
 echo "   Interface:  ${WG_IFACE}"
