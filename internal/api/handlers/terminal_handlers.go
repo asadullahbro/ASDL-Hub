@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
 )
 
@@ -38,6 +39,13 @@ type TerminalMessage struct {
 	Cols uint32 `json:"cols"`
 }
 
+// A terminal is a shell on the node with the Hub's SSH account, which is as
+// powerful as anything the Hub can do there, so it is for admins only. Any
+// valid login is not enough: operators and viewers must not get one.
+func canOpenTerminal(user *models.User) bool {
+	return user != nil && user.Role == models.RoleAdmin
+}
+
 func (h *TerminalHandlers) Terminal(c *gin.Context) {
 	nodeID := c.Param("id")
 
@@ -47,9 +55,13 @@ func (h *TerminalHandlers) Terminal(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 		return
 	}
-	_, err := h.auth.ValidateToken(token)
+	user, err := h.auth.ValidateToken(token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+	if !canOpenTerminal(user) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "the node terminal needs the admin role"})
 		return
 	}
 

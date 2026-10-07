@@ -332,9 +332,13 @@ For the command line, run: asdl-hub help
 	protected := router.Group("/api/v1")
 	protected.Use(middleware.Auth(authService))
 	{
+		// Admin only. A terminal is a shell on the node, so operators and viewers
+		// don't get one. The handler checks the role too, so a mistake here
+		// can't open it up.
+		protected.GET("/nodes/:id/terminal", middleware.RequireRole(models.RoleAdmin), terminalHandlers.Terminal)
+
 		// All authenticated roles
 		protected.GET("/auth/me", authHandlers.Me)
-		protected.GET("/nodes/:id/terminal", terminalHandlers.Terminal)
 		protected.GET("/stats", func(c *gin.Context) {
 			var nodes []models.Node
 			var projects []models.Project

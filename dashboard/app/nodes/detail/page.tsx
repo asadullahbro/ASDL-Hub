@@ -217,7 +217,7 @@ export default function NodeDetailPage() {
         actions={
           <>
             <Button variant="ghost" icon={RefreshCw} onClick={loadAll}>Refresh</Button>
-            {canEdit && (
+            {isAdmin && (
               <Button icon={SquareTerminal} disabled={!node.online} onClick={() => setTerminalNodeId(node.id)}>
                 Terminal
               </Button>
