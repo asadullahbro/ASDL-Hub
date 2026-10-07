@@ -70,11 +70,35 @@ func TestMaintenance_NodeCanOnlyChangeItsOwn(t *testing.T) {
 		ops.SetMaintenanceFromNode(c)
 		return w.Code
 	}
-	if code := call("good", "10.0.0.4"); code != http.StatusForbidden {
-		t.Errorf("node ok changing good: %d, want 403", code)
+	inMaintenance := func(id string) bool {
+		var n models.Node
+		db.First(&n, "id = ?", id)
+		return n.Maintenance
 	}
-	if code := call("good", "10.0.0.3"); code != http.StatusOK {
+
+	// The node is whoever's address the request came from; the ID in the URL
+	// plays no part. Node ok (10.0.0.4) naming "good" changes ok, never good.
+	if code := call("good", "10.0.0.4"); code != http.StatusOK {
+		t.Errorf("node ok asking, with good's ID in the URL: %d, want 200", code)
+	}
+	if inMaintenance("good") {
+		t.Error("node ok put node good into maintenance")
+	}
+	if !inMaintenance("ok") {
+		t.Error("the request came from node ok, so ok is the one that changes")
+	}
+
+	// Node good, asking for itself (by its ID, or "self" as new agents send).
+	if code := call("self", "10.0.0.3"); code != http.StatusOK {
 		t.Errorf("node good changing itself: %d, want 200", code)
+	}
+	if !inMaintenance("good") {
+		t.Error("node good should be in maintenance after asking")
+	}
+
+	// An address that belongs to no node is refused.
+	if code := call("good", "10.0.0.99"); code != http.StatusForbidden {
+		t.Errorf("unknown address: %d, want 403", code)
 	}
 }
 

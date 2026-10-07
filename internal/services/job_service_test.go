@@ -34,7 +34,8 @@ func TestJobClaim_ReturnsOldestPendingJob(t *testing.T) {
 	db.Create(&models.Node{ID: "n1", Hostname: "mac-mini", VPNIP: "10.100.0.2"})
 	db.Create(&models.Job{ID: "j1", NodeID: "n1", Type: models.JobTypeCommand, Status: models.JobStatusPending, Command: "echo hi"})
 
-	c, w := newTestContext(http.MethodPost, "/jobs/claim?node_id=n1", "")
+	c, w := newTestContext(http.MethodPost, "/jobs/claim", "")
+	c.Set("vpn_ip", "10.100.0.2")
 	svc.Claim(c)
 
 	if w.Code != http.StatusOK {
@@ -55,7 +56,8 @@ func TestJobClaim_NoJobsReturnsNoContent(t *testing.T) {
 	svc, db := newJobTestService(t)
 	db.Create(&models.Node{ID: "n1", Hostname: "mac-mini", VPNIP: "10.100.0.2"})
 
-	c, w := newTestContext(http.MethodPost, "/jobs/claim?node_id=n1", "")
+	c, w := newTestContext(http.MethodPost, "/jobs/claim", "")
+	c.Set("vpn_ip", "10.100.0.2")
 	svc.Claim(c)
 
 	if w.Code != http.StatusNoContent {
@@ -63,7 +65,7 @@ func TestJobClaim_NoJobsReturnsNoContent(t *testing.T) {
 	}
 }
 
-func TestJobClaim_FallsBackToVPNIPWhenNodeIDMissing(t *testing.T) {
+func TestJobClaim_IdentifiesNodeByVPNIP(t *testing.T) {
 	svc, db := newJobTestService(t)
 	db.Create(&models.Node{ID: "n1", Hostname: "mac-mini", VPNIP: "10.100.0.2"})
 	db.Create(&models.Job{ID: "j1", NodeID: "n1", Type: models.JobTypeCommand, Status: models.JobStatusPending, Command: "echo hi"})
@@ -73,7 +75,7 @@ func TestJobClaim_FallsBackToVPNIPWhenNodeIDMissing(t *testing.T) {
 	svc.Claim(c)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 resolving node by vpn_ip, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200 identifying the node by its vpn_ip, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -81,6 +83,7 @@ func TestJobClaim_UnknownNodeNotFound(t *testing.T) {
 	svc, _ := newJobTestService(t)
 
 	c, w := newTestContext(http.MethodPost, "/jobs/claim?node_id=ghost", "")
+	c.Set("vpn_ip", "10.100.0.99")
 	svc.Claim(c)
 
 	if w.Code != http.StatusNotFound {

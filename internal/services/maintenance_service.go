@@ -129,15 +129,16 @@ func (s *NodeOpsService) SetMaintenanceHandler(c *gin.Context) {
 }
 
 // SetMaintenanceFromNode handles POST /nodes/:id/maintenance on the mesh:
-// the node's own agent, identified by its VPN address, asking for it.
+// the node's own agent, identified by its VPN address, asking for it. The :id
+// segment is ignored (agents send "self"), so a node can only ever change its
+// own maintenance mode.
 func (s *NodeOpsService) SetMaintenanceFromNode(c *gin.Context) {
-	vpnIP, _ := c.Get("vpn_ip")
-	var node models.Node
-	if err := s.db.First(&node, "id = ? AND vpn_ip = ?", c.Param("id"), vpnIP).Error; err != nil {
+	node, err := nodeByAddress(s.db, c)
+	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "a node can only change its own maintenance mode"})
 		return
 	}
-	s.setMaintenance(c, &node, "the node itself")
+	s.setMaintenance(c, node, "the node itself")
 }
 
 func (s *NodeOpsService) setMaintenance(c *gin.Context, node *models.Node, by string) {

@@ -78,21 +78,18 @@ func (s *JobService) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, job)
 }
 
+// Claim hands the calling node its next pending job. Which node is calling
+// comes from the connection's address alone: a node_id in the query (old
+// agents send one) is ignored, so a node can never claim another node's jobs,
+// which carry that node's secret environment variables.
 func (s *JobService) Claim(c *gin.Context) {
-	nodeID := c.Query("node_id")
-
-	vpnIP, exists := c.Get("vpn_ip")
-	if !exists {
-		vpnIP = c.ClientIP()
-	}
-
-	var node models.Node
-	err := s.db.Where("id = ? OR vpn_ip = ?", nodeID, vpnIP).First(&node).Error
+	found, err := nodeByAddress(s.db, c)
 	if err != nil {
 		log.Printf("Node not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
+	node := *found
 
 	var job models.Job
 	err = s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).

@@ -23,6 +23,24 @@ func NewNodeService(db *gorm.DB) *NodeService {
 	return &NodeService{db: db}
 }
 
+// nodeByAddress finds the node a mesh request came from, by the address of
+// the connection. WireGuard ties each address to one node (every peer is
+// limited to its own /32), so the address is the node's identity; nothing the
+// node sends takes part, such as an ID in the URL or query. The address comes
+// from the VPNOnly middleware, so this is only for routes behind it.
+func nodeByAddress(db *gorm.DB, c *gin.Context) (*models.Node, error) {
+	ip, _ := c.Get("vpn_ip")
+	addr, _ := ip.(string)
+	if addr == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var node models.Node
+	if err := db.First(&node, "vpn_ip = ?", addr).Error; err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
 func (s *NodeService) Register(c *gin.Context) {
 	var req struct {
 		Hostname     string   `json:"hostname"`
@@ -100,10 +118,10 @@ func (s *NodeService) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, node)
 }
 
+// Heartbeat handles POST /nodes/:id/heartbeat. The node is whoever's address
+// the request came from; the :id segment is ignored (agents send "self"), so
+// a node can never report as another node.
 func (s *NodeService) Heartbeat(c *gin.Context) {
-	nodeID := c.Param("id")
-	vpnIP, _ := c.Get("vpn_ip")
-
 	var req struct {
 		CPUPercent  float64 `json:"cpu_percent"`
 		MemoryUsed  int64   `json:"memory_used"`
@@ -124,11 +142,12 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 		return
 	}
 
-	var node models.Node
-	if err := s.db.First(&node, "id = ? OR vpn_ip = ?", nodeID, vpnIP).Error; err != nil {
+	found, err := nodeByAddress(s.db, c)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
+	node := *found
 
 	if !node.Online {
 		notifyNodeOnline(&node)
