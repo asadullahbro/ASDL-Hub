@@ -460,30 +460,49 @@ func notifyNodeOnline(node *models.Node) {
 	})
 }
 
-func (s *NodeService) StartOfflineSweeper() {
-	go func() {
-		// Agents send a heartbeat every 30s; three missed ones mean offline.
-		ticker := time.NewTicker(15 * time.Second)
-		for range ticker.C {
-			var nodes []models.Node
-			s.db.Where("online = ?", true).Find(&nodes)
+// After the Hub starts, nodes get this long to send a heartbeat before any
+// is judged offline. An update or restart leaves every node's last heartbeat
+// older than the sweeper's limit, and without this the first sweep would mark
+// them all offline, alert about it, and start failing their apps over.
+const offlineGrace = 2 * time.Minute
 
-			for _, node := range nodes {
-				if time.Since(node.LastHeartbeat) > 90*time.Second {
-					node.Online = false
-					s.db.Save(&node)
-					log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)
-					notify(Event{
-						Type: EventNodeOffline, Level: LevelError,
-						Title:   node.Hostname + " is offline",
-						Message: fmt.Sprintf("No heartbeat from %s for %s. Its apps move to other nodes if they stop answering.", node.Hostname, time.Since(node.LastHeartbeat).Round(time.Second)),
-						Fields:  []EventField{{Name: "Address", Value: node.VPNIP}},
-						URL:     link("/nodes"), Node: node.Hostname,
-					})
-				}
-			}
+// A node that has sent nothing for this long is offline. Agents send a
+// heartbeat every 30s, so this is three missed ones.
+const heartbeatTimeout = 90 * time.Second
+
+func (s *NodeService) StartOfflineSweeper() {
+	started := time.Now()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		for now := range ticker.C {
+			s.sweepOffline(now, started)
 		}
 	}()
+}
+
+// sweepOffline marks online nodes that have missed their heartbeats as
+// offline. It does nothing until offlineGrace has passed since started.
+func (s *NodeService) sweepOffline(now, started time.Time) {
+	if now.Sub(started) < offlineGrace {
+		return
+	}
+	var nodes []models.Node
+	s.db.Where("online = ?", true).Find(&nodes)
+
+	for _, node := range nodes {
+		if now.Sub(node.LastHeartbeat) > heartbeatTimeout {
+			node.Online = false
+			s.db.Save(&node)
+			log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)
+			notify(Event{
+				Type: EventNodeOffline, Level: LevelError,
+				Title:   node.Hostname + " is offline",
+				Message: fmt.Sprintf("No heartbeat from %s for %s. Its apps move to other nodes if they stop answering.", node.Hostname, now.Sub(node.LastHeartbeat).Round(time.Second)),
+				Fields:  []EventField{{Name: "Address", Value: node.VPNIP}},
+				URL:     link("/nodes"), Node: node.Hostname,
+			})
+		}
+	}
 }
 
 // Remove handles DELETE /nodes/:id: forgets a node for good. Its WireGuard
