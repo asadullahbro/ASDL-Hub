@@ -1,0 +1,64 @@
+package handlers
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/asdl/hub/internal/models"
+	"github.com/asdl/hub/internal/services"
+	"github.com/asdl/hub/internal/testutil"
+)
+
+func loginRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.MinCost)
+	db.Create(&models.User{ID: "u1", Username: "alice", Email: "a@example.com", Password: string(hash), Role: models.RoleAdmin})
+	r := gin.New()
+	r.POST("/login", NewAuthHandlers(services.NewAuthService(db, "secret")).Login)
+	return r
+}
+
+func login(r *gin.Engine, from, user, pass string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"`+user+`","password":"`+pass+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = from + ":5000"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestLogin_StopsGuessingAndKeepsRealUsersOut_OfTheWay(t *testing.T) {
+	r := loginRouter(t)
+	attacker := "203.0.113.9"
+
+	for i := 0; i < 8; i++ {
+		if w := login(r, attacker, "alice", "guess"); w.Code != http.StatusUnauthorized {
+			t.Fatalf("guess %d: status %d, want 401", i, w.Code)
+		}
+	}
+	// Past the limit even the right password is refused from that address.
+	w := login(r, attacker, "alice", "correct-horse")
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("after 8 failures: status %d, Retry-After %q; want 429 with a wait", w.Code, w.Header().Get("Retry-After"))
+	}
+	// Someone else is not affected, and a normal login works.
+	if w := login(r, "198.51.100.4", "alice", "correct-horse"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "token") {
+		t.Fatalf("a different address: status %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLogin_UnknownUserAndWrongPasswordLookTheSame(t *testing.T) {
+	r := loginRouter(t)
+	a := login(r, "203.0.113.1", "alice", "wrong")
+	b := login(r, "203.0.113.2", "nobody", "wrong")
+	if a.Code != b.Code || a.Body.String() != b.Body.String() {
+		t.Errorf("responses differ: %d %q vs %d %q", a.Code, a.Body.String(), b.Code, b.Body.String())
+	}
+}

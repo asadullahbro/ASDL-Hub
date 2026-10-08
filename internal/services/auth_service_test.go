@@ -182,3 +182,21 @@ func TestValidateToken_RevokedPermanentTokenRejected(t *testing.T) {
 		t.Fatal("expected a revoked permanent token to be rejected")
 	}
 }
+
+func TestValidateToken_RejectsOtherSigningMethods(t *testing.T) {
+	svc := newAuthTestService(t)
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		tok, err := jwt.NewWithClaims(method, jwt.MapClaims{"user_id": "u1", "exp": time.Now().Add(time.Hour).Unix()}).SignedString([]byte("test-secret"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.ValidateToken(tok); err == nil {
+			t.Errorf("a token signed with %s was accepted", method.Alg())
+		}
+	}
+	// The one the Hub issues still works.
+	_, tok, _ := svc.Login("alice", "correct-horse")
+	if _, err := svc.ValidateToken(tok); err != nil {
+		t.Errorf("the Hub's own token was refused: %v", err)
+	}
+}

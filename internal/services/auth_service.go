@@ -30,9 +30,15 @@ func NewAuthService(db *gorm.DB, jwtSecret string) *AuthService {
 	}
 }
 
+// A hash to compare against when the username doesn't exist, so an unknown
+// user takes as long to refuse as a wrong password and the response time
+// doesn't reveal which usernames exist.
+var unknownUserHash, _ = bcrypt.GenerateFromPassword([]byte("no-such-user"), bcrypt.DefaultCost)
+
 func (s *AuthService) Login(username, password string) (*models.User, string, error) {
 	var user models.User
 	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+		_ = bcrypt.CompareHashAndPassword(unknownUserHash, []byte(password))
 		return nil, "", errors.New("invalid credentials")
 	}
 
@@ -57,7 +63,7 @@ func (s *AuthService) Login(username, password string) (*models.User, string, er
 func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.jwtSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 	if err != nil || !token.Valid {
 		return nil, errors.New("invalid token")

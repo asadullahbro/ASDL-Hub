@@ -1,22 +1,26 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
 )
 
 type AuthHandlers struct {
 	authService *services.AuthService
+	limiter     *middleware.LoginLimiter
 }
 
 func NewAuthHandlers(authService *services.AuthService) *AuthHandlers {
-	return &AuthHandlers{authService: authService}
+	return &AuthHandlers{authService: authService, limiter: middleware.NewLoginLimiter()}
 }
 
 func (h *AuthHandlers) Login(c *gin.Context) {
@@ -30,11 +34,23 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 		return
 	}
 
+	// Too many wrong passwords from this address, or for this account: refuse
+	// without even checking the password.
+	ip := c.ClientIP()
+	if blocked, wait := h.limiter.Blocked(ip, req.Username); blocked {
+		secs := int(wait.Seconds()) + 1
+		c.Header("Retry-After", strconv.Itoa(secs))
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": fmt.Sprintf("too many failed logins; try again in %d minutes", secs/60+1)})
+		return
+	}
+
 	user, token, err := h.authService.Login(req.Username, req.Password)
 	if err != nil {
+		h.limiter.Failed(ip, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
+	h.limiter.Succeeded(req.Username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
