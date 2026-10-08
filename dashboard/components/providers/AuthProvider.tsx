@@ -65,7 +65,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem('user');
         setUser(null);
         setLoading(false);
-        router.push('/login');
+        // An expired token: sign in again, then carry on to the page asked for.
+        if (!PUBLIC_ROUTES.includes(pathname)) router.push(loginUrl(pathname));
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
