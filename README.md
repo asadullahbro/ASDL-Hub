@@ -90,7 +90,7 @@ curl -fsSL https://get.asdl.website/asdl-hub | bash        # Linux, macOS: choos
 ```
 
 ```powershell
-irm https://github.com/asadullahbro/ASDL-Hub/releases/latest/download/install.ps1 | iex   # Windows PowerShell
+irm https://get.asdl.website/asdl-hub | iex                 # Windows PowerShell
 ```
 
 To upgrade, click **Update now** in the dashboard when it says a new release
