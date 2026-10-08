@@ -62,8 +62,10 @@ func (e *env) login(args []string) error {
 	}
 
 	var res struct {
-		Token string `json:"token"`
-		User  struct {
+		MFARequired bool   `json:"mfa_required"`
+		MFAToken    string `json:"mfa_token"`
+		Token       string `json:"token"`
+		User        struct {
 			Username string `json:"username"`
 			Role     string `json:"role"`
 		} `json:"user"`
@@ -74,6 +76,25 @@ func (e *env) login(args []string) error {
 			return errors.New("wrong username or password")
 		}
 		return err
+	}
+
+	// Two-factor is on for this user: the password was right, now the code.
+	if res.MFARequired {
+		code, err := prompt(in, "Two-factor code (or a recovery code): ")
+		if err != nil {
+			return err
+		}
+		res.MFARequired = false
+		if err := c.do("POST", "/auth/2fa/login", map[string]string{"mfa_token": res.MFAToken, "code": code}, &res); err != nil {
+			var ae *apiError
+			if errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
+				return errors.New("wrong or expired code; run asdl-hub login again")
+			}
+			return err
+		}
+	}
+	if res.Token == "" {
+		return errors.New("the Hub signed you in without a token")
 	}
 	c.token = res.Token
 
