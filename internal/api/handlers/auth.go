@@ -18,6 +18,9 @@ import (
 type AuthHandlers struct {
 	authService *services.AuthService
 	limiter     *middleware.LoginLimiter
+	// CLI signs the command line in through the browser; set after the
+	// settings service exists.
+	CLI *services.CLIAuth
 }
 
 func NewAuthHandlers(authService *services.AuthService) *AuthHandlers {

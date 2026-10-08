@@ -21,6 +21,20 @@ const AuthContext = createContext<AuthContextType>({
 
 const PUBLIC_ROUTES = ['/login'];
 
+// Where to go after signing in: the page that sent us to /login (kept in
+// ?next=), if it is a page of this app, else the home page.
+function nextAfterLogin(): string {
+  if (typeof window === 'undefined') return '/';
+  const next = new URLSearchParams(window.location.search).get('next') || '';
+  return next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/login') ? next : '/';
+}
+
+// The login page, remembering where the user was headed.
+function loginUrl(pathname: string): string {
+  if (typeof window === 'undefined' || pathname === '/' || PUBLIC_ROUTES.includes(pathname)) return '/login';
+  return '/login?next=' + encodeURIComponent(pathname + window.location.search);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!token) {
       setLoading(false);
-      if (!PUBLIC_ROUTES.includes(pathname)) router.push('/login');
+      if (!PUBLIC_ROUTES.includes(pathname)) router.push(loginUrl(pathname));
       return;
     }
 
@@ -60,10 +74,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 useEffect(() => {
   if (loading) return;
   if (!user && !PUBLIC_ROUTES.includes(pathname)) {
-    router.replace('/login'); // replace not push — no history entry
+    router.replace(loginUrl(pathname)); // replace not push — no history entry
   }
   if (user && PUBLIC_ROUTES.includes(pathname)) {
-    router.replace('/'); // already authed, kick to dashboard
+    router.replace(nextAfterLogin()); // already authed: on to where they were going
   }
 }, [pathname, user, loading, router]);
 
@@ -72,7 +86,7 @@ useEffect(() => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
-    router.replace('/'); // push here instead of in the login page
+    router.replace(nextAfterLogin()); // push here instead of in the login page
   };
 
   const logout = () => {

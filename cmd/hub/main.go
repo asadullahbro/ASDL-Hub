@@ -169,6 +169,7 @@ For the command line, run: asdl-hub help
 	// Settings service and handler
 	settingsService := services.NewSettingsService(database, authService, jwtSecret)
 	settingsHandlers := handlers.NewSettingsHandlers(settingsService)
+	authHandlers.CLI = services.NewCLIAuth(authService, settingsService)
 
 	// enrollment and wireguard services
 	wireGuardService := services.NewWireGuardService(database)
@@ -252,6 +253,8 @@ For the command line, run: asdl-hub help
 	{
 		auth.POST("/login", authHandlers.Login)
 		auth.POST("/2fa/login", authHandlers.LoginTwoFactor)
+		auth.POST("/cli/start", authHandlers.CLIStart)
+		auth.POST("/cli/poll", authHandlers.CLIPoll)
 	}
 
 	// PUBLIC API ROUTES - No authentication required
@@ -349,6 +352,9 @@ For the command line, run: asdl-hub help
 
 		// All authenticated roles
 		protected.GET("/auth/me", authHandlers.Me)
+		protected.GET("/auth/cli/request", authHandlers.CLIRequest)
+		protected.POST("/auth/cli/approve", authHandlers.CLIApprove)
+		protected.POST("/auth/cli/deny", authHandlers.CLIDeny)
 		protected.POST("/auth/2fa/setup", authHandlers.SetupTwoFactor)
 		protected.POST("/auth/2fa/enable", authHandlers.EnableTwoFactor)
 		protected.POST("/auth/2fa/disable", authHandlers.DisableTwoFactor)

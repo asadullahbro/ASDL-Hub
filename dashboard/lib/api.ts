@@ -198,6 +198,16 @@ export const api = {
   getMe: (): Promise<User> =>
     request<User>('/auth/me'),
 
+  // Signing the command line in through the browser
+  getCLIRequest: (code: string): Promise<{ machine: string; ip: string; created_at: string; expires_at: string; status: string }> =>
+    request(`/auth/cli/request?code=${encodeURIComponent(code)}`),
+
+  approveCLI: (code: string): Promise<{ message: string }> =>
+    request('/auth/cli/approve', { method: 'POST', body: JSON.stringify({ code }) }),
+
+  denyCLI: (code: string): Promise<{ message: string }> =>
+    request('/auth/cli/deny', { method: 'POST', body: JSON.stringify({ code }) }),
+
   // Two-factor sign-in
   setupTwoFactor: (): Promise<{ secret: string; uri: string }> =>
     request('/auth/2fa/setup', { method: 'POST' }),

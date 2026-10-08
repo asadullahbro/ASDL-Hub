@@ -145,3 +145,69 @@ func TestLogin_WithTwoFactor(t *testing.T) {
 		t.Errorf("after many wrong codes: %d, want 429", w.Code)
 	}
 }
+
+func TestCLIBrowserLogin_OverHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	admin := &models.User{ID: "a1", Username: "root", Email: "r@x", Password: "x", Role: models.RoleAdmin}
+	db.Create(admin)
+	auth := services.NewAuthService(db, "secret")
+	h := NewAuthHandlers(auth)
+	h.CLI = services.NewCLIAuth(auth, services.NewSettingsService(db, auth, "secret"))
+
+	r := gin.New()
+	r.POST("/cli/start", h.CLIStart)
+	r.POST("/cli/poll", h.CLIPoll)
+	signedIn := r.Group("/", func(c *gin.Context) { c.Set("user", admin) }) // stands in for the Auth middleware
+	signedIn.GET("/cli/request", h.CLIRequest)
+	signedIn.POST("/cli/approve", h.CLIApprove)
+
+	w := post(r, "/cli/start", "198.51.100.7", `{"machine":"build-box"}`)
+	var start struct {
+		Code   string `json:"code"`
+		Secret string `json:"poll_secret"`
+		Path   string `json:"path"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &start)
+	if w.Code != http.StatusOK || len(start.Code) != 9 || start.Secret == "" || !strings.Contains(start.Path, start.Code) {
+		t.Fatalf("start: %d %s", w.Code, w.Body.String())
+	}
+	poll := func(code, secret string) *httptest.ResponseRecorder {
+		return post(r, "/cli/poll", "198.51.100.7", `{"code":"`+code+`","poll_secret":"`+secret+`"}`)
+	}
+
+	if w := poll(start.Code, start.Secret); w.Code != http.StatusAccepted {
+		t.Fatalf("before approval: %d", w.Code)
+	}
+	// The page learns who asked, from where.
+	req := httptest.NewRequest(http.MethodGet, "/cli/request?code="+start.Code, nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "build-box") || !strings.Contains(rec.Body.String(), "198.51.100.7") {
+		t.Fatalf("request info: %d %s", rec.Code, rec.Body.String())
+	}
+	if w := post(r, "/cli/approve", "203.0.113.2", `{"code":"`+start.Code+`"}`); w.Code != http.StatusOK {
+		t.Fatalf("approve: %d %s", w.Code, w.Body.String())
+	}
+	if w := poll(start.Code, "wrong"); w.Code != http.StatusNotFound {
+		t.Errorf("wrong secret: %d, want 404", w.Code)
+	}
+	w = poll(start.Code, start.Secret)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"token"`) {
+		t.Fatalf("after approval: %d %s", w.Code, w.Body.String())
+	}
+	if w := poll(start.Code, start.Secret); w.Code != http.StatusNotFound {
+		t.Errorf("second collection: %d, want 404", w.Code)
+	}
+
+	// Guessing at secrets is limited.
+	other := post(r, "/cli/start", "198.51.100.8", `{}`)
+	var o struct{ Code string }
+	json.Unmarshal(other.Body.Bytes(), &o)
+	for i := 0; i < 20; i++ {
+		poll(o.Code, "guess")
+	}
+	if w := poll(o.Code, "guess"); w.Code != http.StatusTooManyRequests {
+		t.Errorf("after many wrong secrets: %d, want 429", w.Code)
+	}
+}

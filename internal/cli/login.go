@@ -8,20 +8,27 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 )
 
-// login signs in to a Hub and saves the credentials. Admins get a permanent
-// token named after this machine (revocable in Settings → Tokens); other
-// users a session that lasts a day.
+// login signs in to a Hub and saves the credentials. By default it opens the
+// Hub's authorise page in the browser, where the user signs in (with
+// two-factor if it's on) and approves this machine; --password asks for the
+// username and password here instead. Admins get a permanent token named
+// after this machine (revocable in Settings → Tokens); other users a session
+// that lasts a day.
 func (e *env) login(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	token := fs.String("token", "", "a permanent token from Settings → Tokens")
 	user := fs.String("user", "", "username")
+	usePassword := fs.Bool("password", false, "sign in with a username and password here instead of in the browser")
+	noBrowser := fs.Bool("no-browser", false, "print the authorise page's address instead of opening it")
 	pos, err := parseWithPositional(fs, args, 0, "")
 	if err != nil {
 		return err
@@ -42,6 +49,10 @@ func (e *env) login(args []string) error {
 	if *token != "" {
 		c.token = *token
 		return e.saveLogin(c, "")
+	}
+
+	if !*usePassword && *user == "" {
+		return e.browserLogin(c, *noBrowser)
 	}
 
 	if *user == "" {
@@ -110,6 +121,79 @@ func (e *env) login(args []string) error {
 		}
 	}
 	return e.saveLogin(c, res.User.Username+", for 24 hours")
+}
+
+// cliPollEvery is how often the browser login asks the Hub whether the user
+// has approved it.
+var cliPollEvery = 2 * time.Second
+
+// browserLogin has the user approve this machine on the Hub's authorise page.
+func (e *env) browserLogin(c *client, noBrowser bool) error {
+	host, _ := os.Hostname()
+	var start struct {
+		Code       string `json:"code"`
+		PollSecret string `json:"poll_secret"`
+		ExpiresIn  int    `json:"expires_in"`
+		Path       string `json:"path"`
+	}
+	if err := c.do("POST", "/auth/cli/start", map[string]string{"machine": host}, &start); err != nil {
+		return err
+	}
+	page := strings.TrimRight(c.url, "/") + start.Path
+	fmt.Fprintf(os.Stderr, "Open this page and approve the login:\n\n  %s\n\nIts code should read %s. Waiting…\n", page, start.Code)
+	if !noBrowser {
+		openBrowser(page)
+	}
+
+	deadline := time.Now().Add(time.Duration(start.ExpiresIn) * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(cliPollEvery)
+		var res struct {
+			Status string `json:"status"`
+			Token  string `json:"token"`
+			User   struct {
+				Username string `json:"username"`
+				Role     string `json:"role"`
+			} `json:"user"`
+		}
+		err := c.do("POST", "/auth/cli/poll", map[string]string{"code": start.Code, "poll_secret": start.PollSecret}, &res)
+		var ae *apiError
+		switch {
+		case errors.As(err, &ae) && ae.Status == http.StatusGone:
+			return errors.New("the login was turned down or timed out; run asdl-hub login again")
+		case err != nil:
+			return err
+		case res.Status != "approved" || res.Token == "":
+			continue // still waiting
+		}
+		c.token = res.Token
+		if res.User.Role == "admin" {
+			name := fmt.Sprintf("asdl-hub CLI (%s@%s)", res.User.Username, host)
+			return e.saveLogin(c, res.User.Username+", token \""+name+"\" (revoke it in Settings → Tokens)")
+		}
+		return e.saveLogin(c, res.User.Username+", for 24 hours")
+	}
+	return errors.New("nobody approved the login in time; run asdl-hub login again")
+}
+
+// openBrowser tries to open url in the user's browser. It says nothing if it
+// can't (no desktop, an SSH session): the address is already printed.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+			return
+		}
+		cmd = exec.Command("xdg-open", url)
+	}
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }()
+	}
 }
 
 func prompt(in *bufio.Reader, q string) (string, error) {
