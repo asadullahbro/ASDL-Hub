@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, SystemVersion } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { VERSION_CHECKED_EVENT } from '@/components/settings/HubVersion';
+import { UPDATE_REQUESTED_EVENT, VERSION_CHECKED_EVENT } from '@/components/settings/HubVersion';
 
 const CHECK_INTERVAL = 30 * 60_000;
 const UPGRADE_TIMEOUT = 5 * 60_000;
@@ -88,6 +88,16 @@ export function UpdateBanner() {
       setPhase({ kind: 'error', message: err instanceof Error ? err.message : 'Could not start the update' });
     }
   };
+
+  // The settings page asks for an update through this event, so it still
+  // works after the banner was dismissed.
+  const startRef = useRef(startUpdate);
+  startRef.current = startUpdate;
+  useEffect(() => {
+    const onRequest = () => startRef.current();
+    window.addEventListener(UPDATE_REQUESTED_EVENT, onRequest);
+    return () => window.removeEventListener(UPDATE_REQUESTED_EVENT, onRequest);
+  }, []);
 
   if (phase.kind === 'upgrading') {
     return (
