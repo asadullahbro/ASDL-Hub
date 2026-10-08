@@ -77,9 +77,21 @@ On an Ubuntu or Debian server (amd64 or arm64):
 curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
 ```
 
-The installer sets up PostgreSQL, WireGuard, nginx, the firewall, HTTPS for
-the dashboard and the Hub itself, then prints your dashboard URL and admin
-login. A domain is optional — without one the Hub uses the server's IP.
+The installer asks whether to install the Hub or only the `asdl-hub` command
+line. Choose the Hub: it sets up PostgreSQL, WireGuard, nginx, the firewall,
+HTTPS for the dashboard and the Hub itself, then prints your dashboard URL and
+admin login. A domain is optional — without one the Hub uses the server's IP.
+
+To manage a Hub from another machine, install just the command line there. It
+works on Linux, macOS and Windows (the Hub itself needs Linux):
+
+```bash
+curl -fsSL https://get.asdl.website/asdl-hub | bash        # Linux, macOS: choose "Command line"
+```
+
+```powershell
+irm https://get.asdl.website/asdl-hub | iex                 # Windows PowerShell
+```
 
 To upgrade, click **Update now** in the dashboard when it says a new release
 is out, or run the same command again; your data and settings are kept. To install

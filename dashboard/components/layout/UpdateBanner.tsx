@@ -9,7 +9,7 @@ import { UPDATE_REQUESTED_EVENT, VERSION_CHECKED_EVENT } from '@/components/sett
 
 const CHECK_INTERVAL = 30 * 60_000;
 const UPGRADE_TIMEOUT = 5 * 60_000;
-const INSTALL_COMMAND = 'curl -fsSL https://get.asdl.website/asdl-hub | sudo bash';
+const INSTALL_COMMAND = 'curl -fsSL https://get.asdl.website/asdl-hub | sudo ASDL_INSTALL=hub bash';
 
 type Phase =
   | { kind: 'idle' }

@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -161,10 +160,9 @@ func (e *env) doctorServer(r *report) {
 	if out, err := exec.Command("systemctl", "is-active", "nginx").Output(); err != nil || strings.TrimSpace(string(out)) != "active" {
 		r.add(levelFail, "nginx isn't running, so no app is reachable", "sudo systemctl start nginx; journalctl -u nginx -n 30")
 	}
-	var st syscall.Statfs_t
-	if syscall.Statfs("/", &st) == nil && st.Blocks > 0 {
-		free := float64(st.Bavail) / float64(st.Blocks) * 100
-		gbFree := float64(st.Bavail) * float64(st.Bsize) / (1 << 30)
+	if freeB, totalB, ok := diskFree("/"); ok {
+		free := float64(freeB) / float64(totalB) * 100
+		gbFree := float64(freeB) / (1 << 30)
 		switch {
 		case free < 5:
 			r.add(levelFail, fmt.Sprintf("Disk almost full: %.1f GB (%.0f%%) free", gbFree, free), "Free space: sudo journalctl --vacuum-size=200M; sudo apt-get clean")

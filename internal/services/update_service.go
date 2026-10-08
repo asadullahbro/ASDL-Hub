@@ -163,7 +163,7 @@ func (s *UpdateService) Update(c *gin.Context) {
 	case !canSelfUpdate():
 		s.mu.Unlock()
 		c.JSON(http.StatusNotImplemented, gin.H{
-			"error": "this install can't update itself yet; run the installer once: curl -fsSL https://get.asdl.website/asdl-hub | sudo bash",
+			"error": "this install can't update itself yet; run the installer once: curl -fsSL https://get.asdl.website/asdl-hub | sudo ASDL_INSTALL=hub bash",
 		})
 		return
 	case s.upgrading != "":

@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -243,9 +242,7 @@ func writeEnvFile(path string, lines []string) error {
 	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), fi.Mode().Perm()); err != nil {
 		return err
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		_ = os.Chown(tmp, int(st.Uid), int(st.Gid))
-	}
+	chownLike(tmp, fi)
 	// Keep the previous version next to it.
 	_ = copyFile(path, path+".bak", fi.Mode().Perm())
 	return os.Rename(tmp, path)

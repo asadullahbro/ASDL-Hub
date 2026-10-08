@@ -4,6 +4,16 @@ set -Eeuo pipefail
 # ASDL Hub installer
 # Usage:
 #   curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
+#
+# On Linux it asks whether to install the Hub (the server) or only the
+# asdl-hub command line. On macOS it installs the command line; on Windows
+# use install.ps1 (irm https://get.asdl.website/asdl-hub | iex).
+#
+# Settings (environment, or the first argument: bash -s -- cli):
+#   ASDL_INSTALL      hub or cli: skip the question
+#   ASDL_BIN_DIR      where the command line goes (default /usr/local/bin as
+#                     root, else ~/.local/bin)
+#   ASDL_CLI_VERSION  a release to install the command line from, such as v0.14.0
 
 APP_NAME="ASDL Hub"
 ASDL_VERSION=""  # stamped at release time by CI
@@ -31,11 +41,147 @@ die() {
     fail "$*"
     echo
     echo "Troubleshooting: $DOCS_URL"
-    echo "Logs: journalctl -u $SERVICE_NAME -n 100 --no-pager"
+    [[ "${MODE:-}" == cli || "$(uname -s)" != Linux ]] || echo "Logs: journalctl -u $SERVICE_NAME -n 100 --no-pager"
     exit 1
 }
 
-trap 'echo; fail "Installation failed."; echo "See: $DOCS_URL"; echo "Logs: journalctl -u $SERVICE_NAME -n 100 --no-pager"' ERR
+trap 'echo; fail "Installation failed."; echo "See: $DOCS_URL"; [[ "${MODE:-}" == cli || "$(uname -s)" != Linux ]] || echo "Logs: journalctl -u $SERVICE_NAME -n 100 --no-pager"' ERR
+
+# ── The command line ────────────────────────────────────────────────────────
+
+CLI_REPO="asadullahbro/ASDL-Hub"
+os_label() { case "$(uname -s)" in Darwin) echo macOS ;; *) uname -s ;; esac; }
+tmp=""
+
+install_cli() {
+    command -v curl >/dev/null || die "curl is needed."
+
+    local os arch version dir base bin want got
+    case "$(uname -s)" in
+        Linux)  os=linux ;;
+        Darwin) os=darwin ;;
+        *) die "No command-line build for $(uname -s). On Windows use PowerShell: irm https://get.asdl.website/asdl-hub | iex" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64)  arch=amd64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) die "Unsupported architecture: $(uname -m)." ;;
+    esac
+
+    version="${ASDL_CLI_VERSION:-$ASDL_VERSION}"
+    if [[ -z "$version" || "$version" == "latest" ]]; then
+        # GitHub redirects /releases/latest to the newest tag.
+        version="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$CLI_REPO/releases/latest")"
+        version="${version##*/}"
+    fi
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || die "Couldn't work out which release to install (got '$version')."
+
+    if [[ -n "${ASDL_BIN_DIR:-}" ]]; then
+        dir="$ASDL_BIN_DIR"
+    elif [[ $EUID -eq 0 ]]; then
+        dir=/usr/local/bin
+    else
+        dir="$HOME/.local/bin"
+    fi
+
+    tmp="$(mktemp -d)"   # global: the exit trap below runs after this function has returned
+    trap 'rm -rf "$tmp"' EXIT
+    base="https://github.com/$CLI_REPO/releases/download/$version"
+
+    # verify FILE NAME: FILE must match NAME's line in the release's checksums.
+    verify() {
+        want="$(awk -v n="$2" '$2 == n { print $1 }' "$tmp/SHA256SUMS")"
+        [[ -n "$want" ]] || die "$2 isn't in this release's checksums."
+        if command -v sha256sum >/dev/null; then got="$(sha256sum "$1" | awk '{print $1}')"; else got="$(shasum -a 256 "$1" | awk '{print $1}')"; fi
+        [[ "$got" == "$want" ]] || die "Checksum mismatch for $2; not installing."
+    }
+
+    info "Installing asdl-hub $version ($os-$arch) to $dir"
+    curl -fsSL --retry 3 --connect-timeout 10 "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" \
+        || die "Release $version wasn't found."
+
+    bin="asdl-hub-$os-$arch"
+    if curl -fsSL --retry 3 --connect-timeout 10 "$base/$bin" -o "$tmp/asdl-hub" 2>/dev/null && grep -q " $bin\$" "$tmp/SHA256SUMS"; then
+        verify "$tmp/asdl-hub" "$bin"
+    elif [[ "$os" == linux ]]; then
+        # Releases before the plain binaries were published only have the full
+        # archive; take the command out of that.
+        local pkg="asdl-hub-$version-linux-$arch"
+        curl -fsSL --retry 3 --connect-timeout 10 "$base/$pkg.tar.gz" -o "$tmp/$pkg.tar.gz" \
+            || die "Couldn't download $pkg.tar.gz."
+        verify "$tmp/$pkg.tar.gz" "$pkg.tar.gz"
+        tar -xzf "$tmp/$pkg.tar.gz" -C "$tmp" "$pkg/bin/asdl-hub"
+        mv "$tmp/$pkg/bin/asdl-hub" "$tmp/asdl-hub"
+    else
+        die "Release $version has no command-line build for $os-$arch."
+    fi
+    chmod 0755 "$tmp/asdl-hub"
+    "$tmp/asdl-hub" version >/dev/null 2>&1 || die "The downloaded program doesn't run on this machine."
+
+    mkdir -p "$dir" || die "Couldn't create $dir (try ASDL_BIN_DIR=... or sudo)."
+    # Copy beside the target and rename, so replacing a running copy is safe.
+    cp "$tmp/asdl-hub" "$dir/.asdl-hub.new" && mv -f "$dir/.asdl-hub.new" "$dir/asdl-hub" \
+        || die "Couldn't write to $dir (try ASDL_BIN_DIR=... or sudo)."
+
+    ok "Installed $("$dir/asdl-hub" version) at $dir/asdl-hub"
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *) echo "  $dir isn't on your PATH. Add it:  export PATH=\"$dir:\$PATH\"" ;;
+    esac
+    local other
+    other="$(command -v asdl-hub 2>/dev/null || true)"
+    if [[ -n "$other" && "$other" != "$dir/asdl-hub" ]]; then
+        echo "  Note: another asdl-hub comes first on your PATH ($other)."
+    fi
+    echo
+    echo "Next: asdl-hub login https://your-hub.example.com"
+}
+
+# ── What to install ─────────────────────────────────────────────────────────
+# The Hub is a server and runs on Linux only; the command line runs anywhere.
+
+MODE="${ASDL_INSTALL:-${1:-}}"
+case "$MODE" in
+    ""|hub|cli) ;;
+    *) die "Unknown choice '$MODE'; use hub or cli." ;;
+esac
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+    [[ "$MODE" != hub ]] || die "The Hub (the server) runs on Linux only. This is $(os_label); install the command line here and the Hub on a Linux server."
+    if [[ -z "$MODE" ]]; then
+        echo
+        echo "  1) ASDL Hub        Linux only, so not available on $(os_label)"
+        echo "  2) Command line    manage a Hub from this machine"
+        echo
+        info "Installing the command line."
+    fi
+    MODE=cli
+elif [[ -z "$MODE" ]]; then
+    if { : </dev/tty; } 2>/dev/null; then
+        echo
+        echo "What would you like to install on this machine?"
+        echo
+        echo "  1) ASDL Hub        the server: dashboard, nodes, apps, domains"
+        echo "  2) Command line    the asdl-hub command, to manage a Hub from here"
+        echo
+        tries=0
+        while [[ -z "$MODE" ]]; do
+            read -r -p "Choose 1 or 2: " answer </dev/tty || answer=""
+            case "$answer" in
+                1|hub) MODE=hub ;;
+                2|cli) MODE=cli ;;
+                *) tries=$((tries + 1)); [[ $tries -lt 3 ]] || die "No choice made." ;;
+            esac
+        done
+    else
+        MODE=hub   # no terminal to ask on (automation, the Hub's own upgrade): the Hub, as it always was
+    fi
+fi
+
+if [[ "$MODE" == cli ]]; then
+    install_cli
+    exit 0
+fi
 
 [[ $EUID -eq 0 ]] || { echo "Run with sudo."; exit 1; }
 

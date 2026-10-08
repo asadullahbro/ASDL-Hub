@@ -103,22 +103,72 @@ jobs:
             -czf "release/${PACKAGE}.tar.gz" \
             "${PACKAGE}"
 
+          # The command on its own, for the CLI installer (the archive also
+          # carries the dashboard and sources).
+          cp "dist/asdl-hub-linux-${{ matrix.goarch }}" \
+             "release/asdl-hub-linux-${{ matrix.goarch }}"
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: asdl-hub-linux-${{ matrix.goarch }}
-          path: release/*.tar.gz
+          path: |
+            release/*.tar.gz
+            release/asdl-hub-linux-${{ matrix.goarch }}
 
       - name: Upload install script
         if: matrix.goarch == 'amd64'
         uses: actions/upload-artifact@v4
         with:
           name: install-script
-          path: scripts/install.sh
+          path: |
+            scripts/install.sh
+            scripts/install.ps1
+
+  # The command line (the same program as the Hub) for systems the Hub itself
+  # doesn't run on; Linux's plain binaries come from the build job above.
+  build-cli:
+    name: CLI ${{ matrix.goos }}-${{ matrix.goarch }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          EXT=""; [ "$GOOS" = windows ] && EXT=".exe"
+          mkdir -p cli
+          go build -trimpath -ldflags="-s -w -X main.Version=${GITHUB_REF_NAME}" \
+            -o "cli/asdl-hub-${GOOS}-${GOARCH}${EXT}" ./cmd/hub
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asdl-hub-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: cli/*
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-cli]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     
@@ -131,7 +181,14 @@ jobs:
           pattern: asdl-hub-linux-*
           merge-multiple: true
 
-    
+
+      - name: Download command-line builds
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: asdl-hub-cli-*
+          merge-multiple: true
+
       - name: Download install script
         uses: actions/download-artifact@v4
         with:
@@ -139,12 +196,16 @@ jobs:
           pattern: install-script
           merge-multiple: true
 
-      - name: Stamp version into install script
-        run: sed -i "s/^ASDL_VERSION=.*/ASDL_VERSION=${GITHUB_REF_NAME}/" release/install.sh
-        
+      - name: Stamp version into install scripts
+        run: |
+          sed -i "s/^ASDL_VERSION=.*/ASDL_VERSION=${GITHUB_REF_NAME}/" release/install.sh
+          sed -i "s/^\$AsdlVersion = .*/\$AsdlVersion = '${GITHUB_REF_NAME}'/" release/install.ps1
+          grep -q "ASDL_VERSION=${GITHUB_REF_NAME}" release/install.sh
+          grep -q "AsdlVersion = '${GITHUB_REF_NAME}'" release/install.ps1
+
       - name: Generate checksums
         working-directory: release
-        run: sha256sum *.tar.gz install.sh > SHA256SUMS
+        run: sha256sum *.tar.gz asdl-hub-linux-* asdl-hub-darwin-* asdl-hub-windows-* install.sh install.ps1 > SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -152,5 +213,9 @@ jobs:
           generate_release_notes: true
           files: |
             release/*.tar.gz
+            release/asdl-hub-linux-*
+            release/asdl-hub-darwin-*
+            release/asdl-hub-windows-*
             release/SHA256SUMS
             release/install.sh
+            release/install.ps1
