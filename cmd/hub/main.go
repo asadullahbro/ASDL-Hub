@@ -251,6 +251,7 @@ For the command line, run: asdl-hub help
 	auth := router.Group("/api/v1/auth")
 	{
 		auth.POST("/login", authHandlers.Login)
+		auth.POST("/2fa/login", authHandlers.LoginTwoFactor)
 	}
 
 	// PUBLIC API ROUTES - No authentication required
@@ -348,6 +349,9 @@ For the command line, run: asdl-hub help
 
 		// All authenticated roles
 		protected.GET("/auth/me", authHandlers.Me)
+		protected.POST("/auth/2fa/setup", authHandlers.SetupTwoFactor)
+		protected.POST("/auth/2fa/enable", authHandlers.EnableTwoFactor)
+		protected.POST("/auth/2fa/disable", authHandlers.DisableTwoFactor)
 		protected.GET("/stats", func(c *gin.Context) {
 			var nodes []models.Node
 			var projects []models.Project
@@ -640,6 +644,7 @@ echo "Agent updated successfully"
 			settings.PUT("/users/:id/password", settingsHandlers.ChangePassword)
 			settings.PUT("/users/:id/role", settingsHandlers.ChangeRole)
 			settings.DELETE("/users/:id", settingsHandlers.DeleteUser)
+			settings.DELETE("/users/:id/2fa", authHandlers.ResetTwoFactor)
 		}
 
 		// Admin only — legacy permanent token endpoint

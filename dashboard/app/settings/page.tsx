@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { HubVersion } from '@/components/settings/HubVersion';
+import { TwoFactor } from '@/components/settings/TwoFactor';
 import { api } from '@/lib/api';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Node, User, PermanentToken, EnrollmentToken } from '@/types';
@@ -205,6 +206,19 @@ export default function SettingsPage() {
     }
   };
 
+  const handleResetTwoFactor = (target: User) => {
+    setSudo({
+      title: `Reset two-factor for ${target.username}`,
+      onConfirm: async (pw: string) => {
+        await api.verifyPassword(pw);
+        await api.resetUserTwoFactor(target.id);
+        setUsers(prev => prev.map(u => (u.id === target.id ? { ...u, totp_enabled: false } : u)));
+        toast('ok', `Two-factor is off for ${target.username}`);
+        setSudo(null);
+      },
+    });
+  };
+
   const handleDeleteUser = async (userId: string) => {
     try {
       await api.deleteUser(userId);
@@ -380,6 +394,9 @@ export default function SettingsPage() {
                   <div className="text-xs text-text-secondary mt-0.5">{u.email}</div>
                 </div>
                 <StatusBadge status={u.role} />
+                {u.totp_enabled && (
+                  <span title="Signs in with an authenticator app" className="text-[10px] font-mono uppercase tracking-wide text-status-green">2FA</span>
+                )}
                 <select
                   value={u.role}
                   onChange={e => handleChangeRole(u.id, e.target.value)}
@@ -396,6 +413,11 @@ export default function SettingsPage() {
                 >
                   Password
                 </Btn>
+                {u.totp_enabled && u.id !== user?.id && (
+                  <Btn variant="default" onClick={() => handleResetTwoFactor(u)}>
+                    Reset 2FA
+                  </Btn>
+                )}
                 {u.id !== user?.id && (
                   <Btn variant="danger" onClick={() => handleDeleteUser(u.id)}>
                     Delete
@@ -462,6 +484,8 @@ export default function SettingsPage() {
           </Btn>
         </div>
       </SectionCard>
+
+      <TwoFactor />
 
       <HubVersion />
 

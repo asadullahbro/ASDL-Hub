@@ -189,8 +189,27 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
 
+  loginTwoFactor: (mfaToken: string, code: string): Promise<{ token: string; user: User }> =>
+    request('/auth/2fa/login', {
+      method: 'POST',
+      body: JSON.stringify({ mfa_token: mfaToken, code }),
+    }),
+
   getMe: (): Promise<User> =>
     request<User>('/auth/me'),
+
+  // Two-factor sign-in
+  setupTwoFactor: (): Promise<{ secret: string; uri: string }> =>
+    request('/auth/2fa/setup', { method: 'POST' }),
+
+  enableTwoFactor: (code: string): Promise<{ recovery_codes: string[] }> =>
+    request('/auth/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) }),
+
+  disableTwoFactor: (password: string, code: string): Promise<{ message: string }> =>
+    request('/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code }) }),
+
+  resetUserTwoFactor: (userId: string): Promise<{ message: string }> =>
+    request(`/settings/users/${userId}/2fa`, { method: 'DELETE' }),
 
   // Nodes
   getNodes: (): Promise<Node[]> =>

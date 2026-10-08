@@ -113,12 +113,13 @@ export interface User {
   email: string;
   role: string;
   created_at: string;
+  totp_enabled?: boolean;
 }
 
-export interface LoginResponse {
-  token: string;
-  user: User;
-}
+// The password step either signs in, or says a two-factor code is still needed.
+export type LoginResponse =
+  | { mfa_required?: false; token: string; user: User }
+  | { mfa_required: true; mfa_token: string };
 
 export interface Project {
   id: string;

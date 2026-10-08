@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -45,6 +46,17 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 	}
 
 	user, token, err := h.authService.Login(req.Username, req.Password)
+	if errors.Is(err, services.ErrTwoFactorRequired) {
+		// Right password; a code is still needed. This counts neither as a
+		// failure nor as a success for the limiter.
+		mfa, err := h.authService.MFAToken(user)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not start two-factor sign-in"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"mfa_required": true, "mfa_token": mfa})
+		return
+	}
 	if err != nil {
 		h.limiter.Failed(ip, req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
@@ -72,11 +84,12 @@ func (h *AuthHandlers) Me(c *gin.Context) {
 
 	u := user.(*models.User)
 	c.JSON(http.StatusOK, gin.H{
-		"id":         u.ID,
-		"username":   u.Username,
-		"email":      u.Email,
-		"role":       u.Role,
-		"created_at": u.CreatedAt,
+		"id":           u.ID,
+		"username":     u.Username,
+		"email":        u.Email,
+		"role":         u.Role,
+		"created_at":   u.CreatedAt,
+		"totp_enabled": u.TOTPEnabled,
 	})
 }
 

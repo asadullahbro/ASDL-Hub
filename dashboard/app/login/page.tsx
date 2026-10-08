@@ -24,6 +24,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Set once the password was right and an authenticator code is still needed.
+  const [mfaToken, setMfaToken] = useState('');
+  const [code, setCode] = useState('');
   const [status, setStatus] = useState<ClusterStatus | null>(null);
 
   useEffect(() => {
@@ -35,11 +38,25 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
+      if (mfaToken) {
+        const response = await api.loginTwoFactor(mfaToken, code);
+        login(response.token, response.user);
+        return;
+      }
       const response = await api.login(username, password);
+      if (response.mfa_required) {
+        setMfaToken(response.mfa_token);
+        return;
+      }
       login(response.token, response.user);
-  
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      // The code step's token lasts five minutes; after that, start over.
+      if (mfaToken && /sign in again/i.test(msg)) {
+        setMfaToken('');
+        setCode('');
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -112,10 +129,34 @@ export default function LoginPage() {
             <span className="text-sm font-semibold text-text-primary tracking-wide">ASDL Hub</span>
           </div>
 
-          <h1 className="text-lg font-semibold text-text-primary mb-1">Sign in</h1>
-          <p className="text-sm text-text-secondary mb-7">Access your control plane</p>
+          <h1 className="text-lg font-semibold text-text-primary mb-1">
+            {mfaToken ? 'Two-factor code' : 'Sign in'}
+          </h1>
+          <p className="text-sm text-text-secondary mb-7">
+            {mfaToken ? 'Enter the 6-digit code from your authenticator app, or a recovery code' : 'Access your control plane'}
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {mfaToken ? (
+              <div>
+                <label htmlFor="code" className="block text-xs text-text-secondary mb-1.5">
+                  Code
+                </label>
+                <input
+                  id="code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="w-full h-9 px-3 bg-surface border border-border rounded-md text-sm font-mono tracking-widest text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+                  placeholder="123456"
+                  autoFocus
+                  required
+                />
+              </div>
+            ) : (
+            <>
             <div>
               <label
                 htmlFor="username"
@@ -151,6 +192,8 @@ export default function LoginPage() {
                 required
               />
             </div>
+            </>
+            )}
 
             {error && (
               <div className="text-status-red text-xs text-center bg-status-red/10 border border-status-red/20 px-3 py-2 rounded-md">
@@ -163,8 +206,17 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full h-9 bg-accent text-black text-sm font-semibold rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 mt-2"
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Signing in…' : mfaToken ? 'Verify' : 'Sign in'}
             </button>
+            {mfaToken && (
+              <button
+                type="button"
+                onClick={() => { setMfaToken(''); setCode(''); setError(''); }}
+                className="w-full text-xs text-text-secondary hover:text-text-primary"
+              >
+                Back
+              </button>
+            )}
           </form>
 
           <div className="mt-8 pt-6 border-t border-border space-y-1.5">

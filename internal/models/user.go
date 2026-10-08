@@ -12,11 +12,20 @@ const (
 )
 
 type User struct {
-	ID        string         `gorm:"primaryKey;size:36" json:"id"`
-	Username  string         `gorm:"uniqueIndex;size:50;not null" json:"username"`
-	Email     string         `gorm:"uniqueIndex;size:100;not null" json:"email"`
-	Password  string         `gorm:"not null" json:"-"`
-	Role      string         `gorm:"size:20;default:viewer" json:"role"`
+	ID       string `gorm:"primaryKey;size:36" json:"id"`
+	Username string `gorm:"uniqueIndex;size:50;not null" json:"username"`
+	Email    string `gorm:"uniqueIndex;size:100;not null" json:"email"`
+	Password string `gorm:"not null" json:"-"`
+	Role     string `gorm:"size:20;default:viewer" json:"role"`
+
+	// Two-factor sign-in with an authenticator app. The secret is stored
+	// encrypted; it exists from the moment setup begins but only counts once
+	// TOTPEnabled is set by confirming a code.
+	TOTPEnabled   bool   `gorm:"not null;default:false" json:"totp_enabled"`
+	TOTPSecret    string `gorm:"type:text" json:"-"`
+	TOTPLastStep  int64  `gorm:"not null;default:0" json:"-"`
+	RecoveryCodes string `gorm:"type:text" json:"-"` // JSON list of bcrypt hashes
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

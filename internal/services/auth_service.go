@@ -46,18 +46,23 @@ func (s *AuthService) Login(username, password string) (*models.User, string, er
 		return nil, "", errors.New("invalid credentials")
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"role":    user.Role,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
-	})
-
-	tokenString, err := token.SignedString([]byte(s.jwtSecret))
+	if user.TOTPEnabled {
+		return &user, "", ErrTwoFactorRequired
+	}
+	tokenString, err := s.sessionToken(&user)
 	if err != nil {
 		return nil, "", err
 	}
-
 	return &user, tokenString, nil
+}
+
+// sessionToken is the token a signed-in user carries.
+func (s *AuthService) sessionToken(user *models.User) (string, error) {
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+	}).SignedString([]byte(s.jwtSecret))
 }
 
 func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
@@ -72,6 +77,11 @@ func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("invalid claims")
+	}
+
+	// A token from the password step of a two-factor sign-in is not a session.
+	if tokenType, _ := claims["type"].(string); tokenType == "mfa" {
+		return nil, errors.New("invalid token")
 	}
 
 	// Handle permanent tokens — look up by token value
