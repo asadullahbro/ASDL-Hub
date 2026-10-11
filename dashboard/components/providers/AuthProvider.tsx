@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@/types';
-import { api } from '@/lib/api';
+import { api, SIGNED_OUT_EVENT } from '@/lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -69,6 +69,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!PUBLIC_ROUTES.includes(pathname)) router.push(loginUrl(pathname));
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Any request the Hub refused because the session is over (lib/api.ts).
+  useEffect(() => {
+    const signedOut = () => setUser(null);
+    window.addEventListener(SIGNED_OUT_EVENT, signedOut);
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, signedOut);
+  }, []);
 
   // Redirect unauthenticated users on route change without re-running auth check
 // Replace the second useEffect with this:

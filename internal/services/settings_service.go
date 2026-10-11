@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -56,7 +57,7 @@ func (s *SettingsService) GeneratePermanentToken(name, createdBy string) (string
 	pt := &models.PermanentToken{
 		ID:        uuid.New().String(),
 		Name:      name,
-		Token:     tokenString,
+		Token:     hashToken(tokenString), // the token itself is shown once, never stored
 		TokenHint: "..." + hint,
 		CreatedBy: createdBy,
 		CreatedAt: time.Now(),
@@ -65,6 +66,26 @@ func (s *SettingsService) GeneratePermanentToken(name, createdBy string) (string
 		return "", nil, err
 	}
 	return tokenString, pt, nil
+}
+
+// HashStoredTokens replaces permanent tokens that older versions stored
+// as-is with their hash, so a copy of the database holds no usable token.
+// Revoked ones too. Tokens keep working: ValidateToken looks up the hash.
+func (s *SettingsService) HashStoredTokens() {
+	var tokens []models.PermanentToken
+	if err := s.db.Unscoped().Where("token LIKE ?", "%.%").Find(&tokens).Error; err != nil {
+		log.Printf("⚠️ Could not read permanent tokens to hash them: %v", err)
+		return
+	}
+	for _, t := range tokens {
+		if err := s.db.Unscoped().Model(&models.PermanentToken{}).Where("id = ?", t.ID).
+			Update("token", hashToken(t.Token)).Error; err != nil {
+			log.Printf("⚠️ Could not hash permanent token %s: %v", t.ID, err)
+		}
+	}
+	if len(tokens) > 0 {
+		log.Printf("🔒 Stored %d permanent token(s) as hashes", len(tokens))
+	}
 }
 
 func (s *SettingsService) ListPermanentTokens() ([]models.PermanentToken, error) {

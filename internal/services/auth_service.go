@@ -66,37 +66,39 @@ func (s *AuthService) ValidateToken(tokenString string, client Client) (*models.
 		return []byte(s.jwtSecret), nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		return nil, ErrTokenExpired
+	}
 	if err != nil || !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, ErrTokenInvalid
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, errors.New("invalid claims")
+		return nil, ErrTokenInvalid
 	}
 
 	// A token from the password step of a two-factor sign-in is not a session.
 	if tokenType, _ := claims["type"].(string); tokenType == "mfa" {
-		return nil, errors.New("invalid token")
+		return nil, ErrTokenInvalid
 	}
 
-	// Handle permanent tokens — look up by token value
+	// Permanent tokens work while their row exists; only a hash is stored.
 	if tokenType, ok := claims["type"].(string); ok && tokenType == "permanent" {
 		var pt models.PermanentToken
-		if err := s.db.Where("token = ?", tokenString).First(&pt).Error; err != nil {
-			return nil, errors.New("permanent token not found or revoked")
+		if err := s.db.Where("token = ?", hashToken(tokenString)).First(&pt).Error; err != nil {
+			return nil, ErrTokenRevoked
 		}
-		// Return the user who created it
 		var user models.User
 		if err := s.db.First(&user, "id = ?", pt.CreatedBy).Error; err != nil {
-			return nil, errors.New("token owner not found")
+			return nil, errUnknownUser
 		}
 		return &user, nil
 	}
 
 	userID, ok := claims["user_id"].(string)
 	if !ok {
-		return nil, errors.New("invalid user_id")
+		return nil, ErrTokenInvalid
 	}
 
 	tokenType, _ := claims["type"].(string)
@@ -113,13 +115,13 @@ func (s *AuthService) ValidateToken(tokenString string, client Client) (*models.
 		// longer-lived without a session is refused.
 		exp, err := claims.GetExpirationTime()
 		if err != nil || exp == nil || time.Until(exp.Time) > 25*time.Hour {
-			return nil, errors.New("invalid token")
+			return nil, ErrTokenTooOld
 		}
 	}
 
 	var user models.User
 	if err := s.db.First(&user, "id = ?", userID).Error; err != nil {
-		return nil, errors.New("user not found")
+		return nil, errUnknownUser
 	}
 
 	return &user, nil

@@ -13,12 +13,19 @@ import (
 	"github.com/asdl/hub/internal/models"
 )
 
+// ProductionMode is PRODUCTION_MODE in the Hub's .env, true unless set to
+// false: quiet logs for a live Hub. Off, the Hub logs every database query
+// and the web server's debug output, for chasing a problem.
+func ProductionMode() bool {
+	return os.Getenv("PRODUCTION_MODE") != "false"
+}
+
 func Init(dsn string) (*gorm.DB, error) {
 	// Logging every statement floods the journal (nodes poll every few
 	// seconds) and would print stored values, so only warnings and errors are
-	// logged unless LOG_LEVEL=debug.
+	// logged in production mode (or unless LOG_LEVEL=debug, the older switch).
 	level := logger.Warn
-	if os.Getenv("LOG_LEVEL") == "debug" {
+	if !ProductionMode() || os.Getenv("LOG_LEVEL") == "debug" {
 		level = logger.Info
 	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

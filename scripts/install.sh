@@ -661,6 +661,10 @@ EOF
 
 write_env() {
     info "Writing configuration..."
+    # Keep the owner's choice across updates; a new Hub starts in production mode.
+    local production_mode
+    production_mode="$(awk -F= '$1=="PRODUCTION_MODE"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+    [[ "$production_mode" == "false" ]] || production_mode=true
     cat > "$INSTALL_DIR/.env" <<EOF
 DB_HOST=127.0.0.1
 DB_PORT=5432
@@ -675,6 +679,11 @@ ADMIN_PASSWORD=$ADMIN_PASSWORD
 
 SERVER_PORT=$HUB_PORT
 PUBLIC_URL=$HUB_URL
+
+# Production mode: quiet logs for a live Hub (the web server in release mode,
+# the database logging only warnings and errors). Set to false while chasing a
+# problem to log every database query and request detail, then set it back.
+PRODUCTION_MODE=$production_mode
 
 WG_INTERFACE=$WG_INTERFACE
 WG_PORT=$WG_PORT

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -107,7 +108,14 @@ func (e *env) doctor() error {
 		Role     string `json:"role"`
 	}
 	if err := c.do("GET", "/auth/me", nil, &me); err != nil {
-		r.add(levelFail, err.Error(), "Is the Hub running? On its server: systemctl status asdl-hub; journalctl -u asdl-hub -n 50")
+		// The Hub answered but refused the saved login (the error says why):
+		// it is up, so don't send the user looking at the server.
+		var ae *apiError
+		if errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
+			r.add(levelFail, err.Error(), "asdl-hub login "+c.url)
+		} else {
+			r.add(levelFail, err.Error(), "Is the Hub running? On its server: systemctl status asdl-hub; journalctl -u asdl-hub -n 50")
+		}
 		return r.finish()
 	}
 	r.ok("Hub answers at %s, signed in as %s (%s)", c.url, me.Username, me.Role)

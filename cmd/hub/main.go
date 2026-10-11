@@ -168,6 +168,7 @@ For the command line, run: asdl-hub help
 
 	// Settings service and handler
 	settingsService := services.NewSettingsService(database, authService, jwtSecret)
+	settingsService.HashStoredTokens()
 	settingsHandlers := handlers.NewSettingsHandlers(settingsService)
 	authHandlers.CLI = services.NewCLIAuth(authService, settingsService)
 
@@ -190,8 +191,14 @@ For the command line, run: asdl-hub help
 		}
 	}()
 
+	// PRODUCTION_MODE (on unless set to false) runs Gin in release mode; an
+	// explicit GIN_MODE still wins.
 	if os.Getenv("GIN_MODE") == "" {
-		gin.SetMode(gin.ReleaseMode)
+		if db.ProductionMode() {
+			gin.SetMode(gin.ReleaseMode)
+		} else {
+			gin.SetMode(gin.DebugMode)
+		}
 	}
 	router := gin.New()
 	// Without this Gin believes X-Forwarded-For from anyone, so the mesh-only
@@ -203,7 +210,7 @@ For the command line, run: asdl-hub help
 	// Nodes poll these every few seconds; logging them would bury
 	// everything else.
 	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: []string{"/api/v1/jobs/claim", "/health"},
+		SkipPaths: []string{"/api/v1/jobs/claim", "/api/v1/nodes/self/heartbeat", "/api/v1/auth/cli/poll", "/health"},
 	}), gin.Recovery())
 
 	// CORS middleware — reflect only allow-listed origins. "*" combined with
@@ -664,7 +671,6 @@ echo "Agent updated successfully"
 		}
 
 		// Admin only — legacy permanent token endpoint
-		protected.POST("/auth/permanent-token", middleware.RequireRole(models.RoleAdmin), authHandlers.GeneratePermanentToken)
 	}
 
 	staticDir := "./dashboard/out"

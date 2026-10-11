@@ -168,6 +168,7 @@ type setting struct {
 
 var settings = map[string]setting{
 	"PUBLIC_URL":           {desc: "the dashboard's public address (links, OIDC audience)"},
+	"PRODUCTION_MODE":      {desc: "true (the default) for quiet logs; false logs every database query and request detail, for debugging"},
 	"LOG_LEVEL":            {desc: "debug logs every database query; empty for warnings and errors"},
 	"CORS_ALLOWED_ORIGINS": {desc: "origins allowed to call the API from a browser, comma-separated"},
 	"GIN_MODE":             {desc: "debug for request logging details"},

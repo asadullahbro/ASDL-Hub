@@ -57,6 +57,10 @@ export class ApiError extends Error {
   }
 }
 
+// Fired when the Hub refuses this browser's token; AuthProvider then shows
+// the sign-in page.
+export const SIGNED_OUT_EVENT = 'asdl:signed-out';
+
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('token');
@@ -78,14 +82,17 @@ async function request<T>(
   });
 
   if (response.status === 401) {
-    // Only wipe the session when /auth/me itself 401s.
-    // Any other endpoint returning 401 just throws locally —
-    // the caller decides what to show, the session stays intact.
-    if (endpoint === '/auth/me' && typeof window !== 'undefined') {
+    const body = await response.json().catch(() => ({}));
+    // The Hub marks the answer signed_out when the token itself is no good
+    // (revoked, expired, ended elsewhere): forget it and go to the sign-in
+    // page, instead of polling on with it. Other 401s, like a wrong password
+    // in a confirm box, leave the session alone.
+    if ((body.signed_out || endpoint === '/auth/me') && typeof window !== 'undefined') {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
     }
-    throw new ApiError(401, 'Unauthorized');
+    throw new ApiError(401, body.error || 'Unauthorized');
   }
 
   if (!response.ok) {

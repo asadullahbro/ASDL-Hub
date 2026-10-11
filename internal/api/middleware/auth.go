@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -32,14 +33,23 @@ func Auth(authService *services.AuthService) gin.HandlerFunc {
 		}
 
 		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization", "signed_out": true})
 			c.Abort()
 			return
 		}
 
 		user, err := authService.ValidateToken(tokenString, ClientOf(c))
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			// Say why (revoked, expired, ended...), and mark the answer so
+			// the dashboard knows to send the user to sign in rather than
+			// keep asking with a token that won't work again.
+			msg := services.ErrTokenInvalid.Error()
+			for _, known := range services.TokenErrors {
+				if errors.Is(err, known) {
+					msg = known.Error()
+				}
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"error": msg, "signed_out": true})
 			c.Abort()
 			return
 		}

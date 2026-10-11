@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -116,11 +117,11 @@ func TestSession_TiedToTheBrowser(t *testing.T) {
 
 	// The token copied to another browser is refused, and ended for good.
 	thief := Client{IP: "203.0.113.66", UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"}
-	if _, err := svc.ValidateToken(token, thief); err == nil {
-		t.Fatal("a token worked from a different browser")
+	if _, err := svc.ValidateToken(token, thief); !errors.Is(err, ErrOtherDevice) {
+		t.Fatalf("a token from a different browser: got %v, want %v", err, ErrOtherDevice)
 	}
-	if _, err := svc.ValidateToken(token, testOpts.Client); err == nil {
-		t.Error("the session survived being used from another browser")
+	if _, err := svc.ValidateToken(token, testOpts.Client); !errors.Is(err, ErrSignedOut) {
+		t.Errorf("the session after being used from another browser: got %v, want %v", err, ErrSignedOut)
 	}
 }
 

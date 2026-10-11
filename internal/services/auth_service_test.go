@@ -1,6 +1,8 @@
 package services
 
 import (
+	"strings"
+	"errors"
 	"testing"
 	"time"
 
@@ -113,8 +115,8 @@ func TestValidateToken_RejectsExpiredToken(t *testing.T) {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err == nil {
-		t.Fatal("expected expired token to be rejected")
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("an expired token: got %v, want %v", err, ErrTokenExpired)
 	}
 }
 
@@ -158,7 +160,7 @@ func TestValidateToken_PermanentTokenResolvesToCreator(t *testing.T) {
 	pt := &models.PermanentToken{
 		ID:        "pt1",
 		Name:      "ci",
-		Token:     tokenString,
+		Token:     hashToken(tokenString),
 		TokenHint: "...hint",
 		CreatedBy: "u1",
 	}
@@ -179,7 +181,7 @@ func TestValidateToken_RevokedPermanentTokenRejected(t *testing.T) {
 	svc := newAuthTestService(t)
 	tokenString := newPermanentToken(t, svc.GetJWTSecret())
 
-	pt := &models.PermanentToken{ID: "pt2", Name: "ci", Token: tokenString, CreatedBy: "u1"}
+	pt := &models.PermanentToken{ID: "pt2", Name: "ci", Token: hashToken(tokenString), CreatedBy: "u1"}
 	if err := svc.db.Create(pt).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -187,8 +189,8 @@ func TestValidateToken_RevokedPermanentTokenRejected(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err == nil {
-		t.Fatal("expected a revoked permanent token to be rejected")
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("a revoked permanent token: got %v, want %v", err, ErrTokenRevoked)
 	}
 }
 
@@ -207,5 +209,48 @@ func TestValidateToken_RejectsOtherSigningMethods(t *testing.T) {
 	_, tok, _ := svc.Login("alice", "correct-horse", testOpts)
 	if _, err := svc.ValidateToken(tok, testOpts.Client); err != nil {
 		t.Errorf("the Hub's own token was refused: %v", err)
+	}
+}
+
+func TestPermanentTokens_StoredOnlyAsAHash(t *testing.T) {
+	svc := newAuthTestService(t)
+	settings := NewSettingsService(svc.db, svc, svc.GetJWTSecret())
+
+	token, pt, err := settings.GeneratePermanentToken("ci", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored models.PermanentToken
+	svc.db.First(&stored, "id = ?", pt.ID)
+	if stored.Token == token || strings.Contains(stored.Token, ".") {
+		t.Fatalf("the token itself is in the database: %q", stored.Token)
+	}
+	if _, err := svc.ValidateToken(token, testOpts.Client); err != nil {
+		t.Fatalf("a new permanent token was refused: %v", err)
+	}
+}
+
+func TestPermanentTokens_OldPlainOnesAreHashedAndKeepWorking(t *testing.T) {
+	svc := newAuthTestService(t)
+	settings := NewSettingsService(svc.db, svc, svc.GetJWTSecret())
+	tokenString := newPermanentToken(t, svc.GetJWTSecret())
+	// As versions before 0.15.1 stored them; one revoked, which must be hashed too.
+	svc.db.Create(&models.PermanentToken{ID: "old", Name: "ci", Token: tokenString, CreatedBy: "u1"})
+	revoked := &models.PermanentToken{ID: "gone", Name: "x", Token: "a.b.c", CreatedBy: "u1"}
+	svc.db.Create(revoked)
+	svc.db.Delete(revoked)
+
+	settings.HashStoredTokens()
+	settings.HashStoredTokens() // running again on every start changes nothing
+
+	var rows []models.PermanentToken
+	svc.db.Unscoped().Find(&rows)
+	for _, r := range rows {
+		if strings.Contains(r.Token, ".") {
+			t.Errorf("token %s is still stored as-is", r.ID)
+		}
+	}
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err != nil {
+		t.Fatalf("an existing permanent token stopped working: %v", err)
 	}
 }

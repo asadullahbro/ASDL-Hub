@@ -43,7 +43,21 @@ type SessionOptions struct {
 	Method   string // password, passkey or cli
 }
 
-var errSignedOut = errors.New("signed out")
+// Why a token was refused. They are safe to show to whoever holds the token,
+// and tell them what to do: the Hub answers 401 with the message, and the
+// dashboard and CLI send the user to sign in again.
+var (
+	ErrTokenInvalid = errors.New("invalid token")
+	ErrTokenExpired = errors.New("token expired")
+	ErrTokenRevoked = errors.New("token revoked")
+	ErrTokenTooOld  = errors.New("token from an older Hub version")
+	ErrSignedOut    = errors.New("session ended")
+	ErrOtherDevice  = errors.New("session ended: it was used from another browser or device")
+	errUnknownUser  = errors.New("token's user no longer exists")
+)
+
+// TokenErrors are the errors ValidateToken returns.
+var TokenErrors = []error{ErrTokenInvalid, ErrTokenExpired, ErrTokenRevoked, ErrTokenTooOld, ErrSignedOut, ErrOtherDevice, errUnknownUser}
 
 // deviceName is the browser and OS a User-Agent names, without versions, so
 // browser updates don't change it.
@@ -137,11 +151,11 @@ func (s *AuthService) issueSession(user *models.User, opts SessionOptions) (stri
 func (s *AuthService) checkSession(sid, userID string, client Client) error {
 	var sess models.Session
 	if err := s.db.First(&sess, "id = ?", sid).Error; err != nil {
-		return errSignedOut
+		return ErrSignedOut
 	}
 	now := time.Now()
 	if sess.UserID != userID || now.After(sess.ExpiresAt) {
-		return errSignedOut
+		return ErrSignedOut
 	}
 	if device := deviceName(client.UserAgent); device != sess.Device {
 		// The token left the browser it was given to. End the session so it
@@ -149,7 +163,7 @@ func (s *AuthService) checkSession(sid, userID string, client Client) error {
 		log.Printf("🔒 Session %s for user %s was used from %q at %s but belongs to %q; signing it out",
 			sid, userID, device, client.IP, sess.Device)
 		s.db.Delete(&models.Session{}, "id = ?", sid)
-		return errSignedOut
+		return ErrOtherDevice
 	}
 	if now.Sub(sess.LastUsedAt) > sessionTouchEvery || sess.LastIP != client.IP {
 		s.db.Model(&models.Session{}).Where("id = ?", sid).

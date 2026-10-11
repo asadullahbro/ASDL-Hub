@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/models"
@@ -94,37 +92,5 @@ func (h *AuthHandlers) Me(c *gin.Context) {
 		"role":         u.Role,
 		"created_at":   u.CreatedAt,
 		"totp_enabled": u.TOTPEnabled,
-	})
-}
-
-func (h *AuthHandlers) GeneratePermanentToken(c *gin.Context) {
-	user, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
-	u := user.(*models.User)
-	if u.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can generate permanent tokens"})
-		return
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": u.ID,
-		"role":    u.Role,
-		"type":    "permanent",
-		"exp":     time.Now().Add(365 * 24 * time.Hour).Unix(),
-	})
-
-	tokenString, err := token.SignedString([]byte(h.authService.GetJWTSecret()))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"token":   tokenString,
-		"expires": time.Now().Add(365 * 24 * time.Hour),
 	})
 }
