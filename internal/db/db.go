@@ -46,6 +46,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.Job{},
 		&models.User{},
 		&models.Session{},
+		&models.Passkey{},
 		&models.Deployment{},
 		&models.Container{},
 		&models.Migration{},

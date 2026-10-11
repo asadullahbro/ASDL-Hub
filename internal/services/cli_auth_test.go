@@ -11,7 +11,7 @@ import (
 
 func newCLIAuthFixture(t *testing.T) (*CLIAuth, *time.Time, *models.User, *models.User) {
 	t.Helper()
-	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
 	auth := NewAuthService(db, "test-secret")
 	cli := NewCLIAuth(auth, NewSettingsService(db, auth, "test-secret"))
 	now := time.Now()
@@ -55,7 +55,7 @@ func TestCLIAuth_AdminsGetARevocableTokenOthersASession(t *testing.T) {
 	code, secret, _ := cli.Start("build-box", "198.51.100.7")
 	cli.Approve(code, admin)
 	_, adminTok, _ := cli.Poll(code, secret)
-	if _, err := cli.auth.ValidateToken(adminTok); err != nil {
+	if _, err := cli.auth.ValidateToken(adminTok, cliClient); err != nil {
 		t.Errorf("the admin's token doesn't work: %v", err)
 	}
 	var tokens []models.PermanentToken
@@ -65,14 +65,14 @@ func TestCLIAuth_AdminsGetARevocableTokenOthersASession(t *testing.T) {
 	}
 	// Revoking it (what asdl-hub logout does) ends it.
 	cli.settings.RevokePermanentToken(tokens[0].ID)
-	if _, err := cli.auth.ValidateToken(adminTok); err == nil {
+	if _, err := cli.auth.ValidateToken(adminTok, cliClient); err == nil {
 		t.Error("a revoked token still works")
 	}
 
 	code, secret, _ = cli.Start("laptop", "198.51.100.8")
 	cli.Approve(code, viewer)
 	_, viewerTok, _ := cli.Poll(code, secret)
-	if _, err := cli.auth.ValidateToken(viewerTok); err != nil {
+	if _, err := cli.auth.ValidateToken(viewerTok, cliClient); err != nil {
 		t.Errorf("the viewer's session doesn't work: %v", err)
 	}
 	cli.settings.db.Find(&tokens)

@@ -17,6 +17,8 @@ import (
 type AuthService struct {
 	db        *gorm.DB
 	jwtSecret string
+	// Passkey registrations and sign-ins waiting for the browser.
+	passkeyCeremonies *ceremonies
 }
 
 func (s *AuthService) GetJWTSecret() string {
@@ -25,8 +27,9 @@ func (s *AuthService) GetJWTSecret() string {
 
 func NewAuthService(db *gorm.DB, jwtSecret string) *AuthService {
 	return &AuthService{
-		db:        db,
-		jwtSecret: jwtSecret,
+		db:                db,
+		jwtSecret:         jwtSecret,
+		passkeyCeremonies: &ceremonies{m: map[string]*ceremony{}},
 	}
 }
 
@@ -35,7 +38,7 @@ func NewAuthService(db *gorm.DB, jwtSecret string) *AuthService {
 // doesn't reveal which usernames exist.
 var unknownUserHash, _ = bcrypt.GenerateFromPassword([]byte("no-such-user"), bcrypt.DefaultCost)
 
-func (s *AuthService) Login(username, password string) (*models.User, string, error) {
+func (s *AuthService) Login(username, password string, opts SessionOptions) (*models.User, string, error) {
 	var user models.User
 	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
 		_ = bcrypt.CompareHashAndPassword(unknownUserHash, []byte(password))
@@ -49,23 +52,16 @@ func (s *AuthService) Login(username, password string) (*models.User, string, er
 	if user.TOTPEnabled {
 		return &user, "", ErrTwoFactorRequired
 	}
-	tokenString, err := s.sessionToken(&user)
+	opts.Method = "password"
+	tokenString, err := s.issueSession(&user, opts)
 	if err != nil {
 		return nil, "", err
 	}
 	return &user, tokenString, nil
 }
 
-// sessionToken is the token a signed-in user carries.
-func (s *AuthService) sessionToken(user *models.User) (string, error) {
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"role":    user.Role,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
-	}).SignedString([]byte(s.jwtSecret))
-}
-
-func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
+// ValidateToken checks a token presented by client and returns its user.
+func (s *AuthService) ValidateToken(tokenString string, client Client) (*models.User, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.jwtSecret), nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
@@ -98,10 +94,27 @@ func (s *AuthService) ValidateToken(tokenString string) (*models.User, error) {
 		return &user, nil
 	}
 
-	// Regular JWT
 	userID, ok := claims["user_id"].(string)
 	if !ok {
 		return nil, errors.New("invalid user_id")
+	}
+
+	tokenType, _ := claims["type"].(string)
+	switch sid, _ := claims["sid"].(string); {
+	case sid != "":
+		if err := s.checkSession(sid, userID, client); err != nil {
+			return nil, err
+		}
+	case tokenType == "local":
+		// The command line's token on the Hub's own server (StartCLIToken).
+	default:
+		// Tokens from before sessions were recorded lasted a day. Let those
+		// run out rather than signing everyone out on upgrade; anything
+		// longer-lived without a session is refused.
+		exp, err := claims.GetExpirationTime()
+		if err != nil || exp == nil || time.Until(exp.Time) > 25*time.Hour {
+			return nil, errors.New("invalid token")
+		}
 	}
 
 	var user models.User
@@ -125,6 +138,7 @@ func (s *AuthService) StartCLIToken(path string) {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 			"user_id": admin.ID,
 			"role":    admin.Role,
+			"type":    "local",
 			"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
 		})
 		signed, err := token.SignedString([]byte(s.jwtSecret))

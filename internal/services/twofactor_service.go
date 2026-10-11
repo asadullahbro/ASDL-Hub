@@ -241,11 +241,12 @@ func (s *AuthService) MFAUser(mfaToken string) (*models.User, error) {
 
 // CompleteTwoFactorLogin checks the code for the user an mfa token names and
 // returns the session token.
-func (s *AuthService) CompleteTwoFactorLogin(user *models.User, code string) (string, error) {
+func (s *AuthService) CompleteTwoFactorLogin(user *models.User, code string, opts SessionOptions) (string, error) {
 	if err := s.checkSecondFactor(user, code); err != nil {
 		return "", err
 	}
-	return s.sessionToken(user)
+	opts.Method = "password"
+	return s.issueSession(user, opts)
 }
 
 var errBadCode = errors.New("that code is wrong or expired")

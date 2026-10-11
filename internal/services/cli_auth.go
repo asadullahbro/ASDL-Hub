@@ -167,7 +167,8 @@ func (c *CLIAuth) Info(code string) (CLIRequestInfo, bool) {
 
 // Approve signs the CLI in as user. Admins get a permanent token named after
 // the machine (revocable in Settings → Tokens, and by asdl-hub logout); others
-// a day-long session, as the password login gave them.
+// a day-long session, as the password login gave them, tied to the command
+// line (which sends its own User-Agent).
 func (c *CLIAuth) Approve(code string, user *models.User) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -184,7 +185,10 @@ func (c *CLIAuth) Approve(code string, user *models.User) error {
 		name := fmt.Sprintf("asdl-hub CLI (%s@%s)", user.Username, r.machine)
 		token, _, err = c.settings.GeneratePermanentToken(name, user.ID)
 	} else {
-		token, err = c.auth.sessionToken(user)
+		token, err = c.auth.issueSession(user, SessionOptions{
+			Client: Client{IP: r.ip, UserAgent: "asdl-hub-cli"},
+			Method: "cli",
+		})
 	}
 	if err != nil {
 		return err

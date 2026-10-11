@@ -116,6 +116,28 @@ export interface User {
   totp_enabled?: boolean;
 }
 
+// A signed-in browser or command line (Settings → Security).
+export interface SignInSession {
+  id: string;
+  device: string;
+  method: 'password' | 'passkey' | 'cli' | '';
+  remember: boolean;
+  ip: string;
+  last_ip: string;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+export interface Passkey {
+  id: string;
+  name: string;
+  rp_id: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 // The password step either signs in, or says a two-factor code is still needed.
 export type LoginResponse =
   | { mfa_required?: false; token: string; user: User }

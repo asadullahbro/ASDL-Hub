@@ -253,6 +253,8 @@ For the command line, run: asdl-hub help
 	{
 		auth.POST("/login", authHandlers.Login)
 		auth.POST("/2fa/login", authHandlers.LoginTwoFactor)
+		auth.POST("/passkey/login/begin", authHandlers.PasskeyLoginBegin)
+		auth.POST("/passkey/login/finish", authHandlers.PasskeyLoginFinish)
 		auth.POST("/cli/start", authHandlers.CLIStart)
 		auth.POST("/cli/poll", authHandlers.CLIPoll)
 	}
@@ -358,6 +360,14 @@ For the command line, run: asdl-hub help
 		protected.POST("/auth/2fa/setup", authHandlers.SetupTwoFactor)
 		protected.POST("/auth/2fa/enable", authHandlers.EnableTwoFactor)
 		protected.POST("/auth/2fa/disable", authHandlers.DisableTwoFactor)
+		protected.POST("/auth/logout", authHandlers.Logout)
+		protected.GET("/auth/sessions", authHandlers.ListSessions)
+		protected.DELETE("/auth/sessions/:id", authHandlers.RevokeSession)
+		protected.POST("/auth/sessions/revoke-others", authHandlers.RevokeOtherSessions)
+		protected.GET("/auth/passkeys", authHandlers.ListPasskeys)
+		protected.POST("/auth/passkeys/register/begin", authHandlers.PasskeyRegisterBegin)
+		protected.POST("/auth/passkeys/register/finish", authHandlers.PasskeyRegisterFinish)
+		protected.DELETE("/auth/passkeys/:id", authHandlers.DeletePasskey)
 		protected.GET("/stats", func(c *gin.Context) {
 			var nodes []models.Node
 			var projects []models.Project

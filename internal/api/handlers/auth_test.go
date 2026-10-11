@@ -30,7 +30,7 @@ func loginRouter(t *testing.T) *gin.Engine {
 func loginRouterWithService(t *testing.T) (*gin.Engine, *services.AuthService) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
 	hash, _ := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.MinCost)
 	db.Create(&models.User{ID: "u1", Username: "alice", Email: "a@example.com", Password: string(hash), Role: models.RoleAdmin})
 	svc := services.NewAuthService(db, "secret")
@@ -148,7 +148,7 @@ func TestLogin_WithTwoFactor(t *testing.T) {
 
 func TestCLIBrowserLogin_OverHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
 	admin := &models.User{ID: "a1", Username: "root", Email: "r@x", Password: "x", Role: models.RoleAdmin}
 	db.Create(admin)
 	auth := services.NewAuthService(db, "secret")

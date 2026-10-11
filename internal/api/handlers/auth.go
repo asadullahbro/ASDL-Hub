@@ -31,6 +31,7 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 	var req struct {
 		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
+		Remember bool   `json:"remember"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -48,7 +49,7 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 		return
 	}
 
-	user, token, err := h.authService.Login(req.Username, req.Password)
+	user, token, err := h.authService.Login(req.Username, req.Password, services.SessionOptions{Client: middleware.ClientOf(c), Remember: req.Remember})
 	if errors.Is(err, services.ErrTwoFactorRequired) {
 		// Right password; a code is still needed. This counts neither as a
 		// failure nor as a success for the limiter.

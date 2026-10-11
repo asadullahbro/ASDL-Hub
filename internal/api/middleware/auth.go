@@ -11,6 +11,11 @@ import (
 	"github.com/asdl/hub/internal/services"
 )
 
+// ClientOf is the address and browser a request comes from.
+func ClientOf(c *gin.Context) services.Client {
+	return services.Client{IP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+}
+
 func Auth(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := ""
@@ -32,7 +37,7 @@ func Auth(authService *services.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		user, err := authService.ValidateToken(tokenString)
+		user, err := authService.ValidateToken(tokenString, ClientOf(c))
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			c.Abort()
@@ -41,6 +46,7 @@ func Auth(authService *services.AuthService) gin.HandlerFunc {
 
 		c.Set("user", user)
 		c.Set("user_id", user.ID)
+		c.Set("session_id", authService.SessionID(tokenString))
 		c.Next()
 	}
 }

@@ -30,6 +30,8 @@ import {
   NotificationEvent,
   NotificationChannel,
   NotificationChannelInput,
+  SignInSession,
+  Passkey,
 } from '@/types';
 
 const API_BASE = typeof window !== 'undefined'
@@ -183,17 +185,52 @@ export const api = {
     request<{ upgrading: string }>('/system/update', { method: 'POST' }),
 
   // Auth
-  login: (username: string, password: string): Promise<LoginResponse> =>
+  // remember: stay signed in for 30 days instead of one.
+  login: (username: string, password: string, remember = false): Promise<LoginResponse> =>
     request<LoginResponse>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     }),
 
-  loginTwoFactor: (mfaToken: string, code: string): Promise<{ token: string; user: User }> =>
+  loginTwoFactor: (mfaToken: string, code: string, remember = false): Promise<{ token: string; user: User }> =>
     request('/auth/2fa/login', {
       method: 'POST',
-      body: JSON.stringify({ mfa_token: mfaToken, code }),
+      body: JSON.stringify({ mfa_token: mfaToken, code, remember }),
     }),
+
+  logout: (): Promise<{ message: string }> =>
+    request('/auth/logout', { method: 'POST' }),
+
+  // Passkey sign-in: the options go to navigator.credentials.get.
+  beginPasskeyLogin: (): Promise<{ ceremony: string; options: unknown }> =>
+    request('/auth/passkey/login/begin', { method: 'POST' }),
+
+  finishPasskeyLogin: (ceremony: string, credential: unknown, remember = false): Promise<{ token: string; user: User }> =>
+    request('/auth/passkey/login/finish', {
+      method: 'POST',
+      body: JSON.stringify({ ceremony, credential, remember }),
+    }),
+
+  // Passkeys of the signed-in user
+  listPasskeys: (): Promise<Passkey[]> => request('/auth/passkeys'),
+
+  beginPasskeyRegistration: (password: string, code: string): Promise<{ ceremony: string; options: unknown }> =>
+    request('/auth/passkeys/register/begin', { method: 'POST', body: JSON.stringify({ password, code }) }),
+
+  finishPasskeyRegistration: (ceremony: string, name: string, credential: unknown): Promise<Passkey> =>
+    request('/auth/passkeys/register/finish', { method: 'POST', body: JSON.stringify({ ceremony, name, credential }) }),
+
+  deletePasskey: (id: string): Promise<{ message: string }> =>
+    request(`/auth/passkeys/${id}`, { method: 'DELETE' }),
+
+  // Where the signed-in user is signed in
+  listSessions: (): Promise<SignInSession[]> => request('/auth/sessions'),
+
+  revokeSession: (id: string): Promise<{ message: string }> =>
+    request(`/auth/sessions/${id}`, { method: 'DELETE' }),
+
+  revokeOtherSessions: (): Promise<{ signed_out: number }> =>
+    request('/auth/sessions/revoke-others', { method: 'POST' }),
 
   getMe: (): Promise<User> =>
     request<User>('/auth/me'),

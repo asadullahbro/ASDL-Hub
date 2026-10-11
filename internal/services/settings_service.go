@@ -152,17 +152,22 @@ func (s *SettingsService) CreateUser(username, email, password, role string) (*m
 	return user, nil
 }
 
-func (s *SettingsService) ChangePassword(userID, newPassword string) error {
+func (s *SettingsService) ChangePassword(userID, newPassword, keepSessionID string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	return s.db.Model(&models.User{}).
+	if err := s.db.Model(&models.User{}).
 		Where("id = ?", userID).
 		Updates(map[string]interface{}{
 			"password":   string(hash),
 			"updated_at": time.Now(),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	// A new password signs the user out everywhere except keepSessionID
+	// (the admin changing their own password stays signed in here).
+	return s.db.Where("user_id = ? AND id <> ?", userID, keepSessionID).Delete(&models.Session{}).Error
 }
 
 func (s *SettingsService) ChangeRole(userID, role string) error {
@@ -181,5 +186,9 @@ func (s *SettingsService) DeleteUser(userID, requesterID string) error {
 	if userID == requesterID {
 		return errors.New("cannot delete your own account")
 	}
-	return s.db.Delete(&models.User{}, "id = ?", userID).Error
+	if err := s.db.Delete(&models.User{}, "id = ?", userID).Error; err != nil {
+		return err
+	}
+	s.db.Where("user_id = ?", userID).Delete(&models.Passkey{})
+	return s.db.Where("user_id = ?", userID).Delete(&models.Session{}).Error
 }

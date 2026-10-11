@@ -76,7 +76,7 @@ func TestTwoFactorLogin_NeedsACodeAndTheMFATokenIsNoSession(t *testing.T) {
 	svc := newAuthTestService(t)
 	key, _ := setUp2FA(t, svc)
 
-	user, token, err := svc.Login("alice", "correct-horse")
+	user, token, err := svc.Login("alice", "correct-horse", testOpts)
 	if err != ErrTwoFactorRequired || token != "" || user == nil {
 		t.Fatalf("login with 2FA on: user=%v token=%q err=%v", user, token, err)
 	}
@@ -86,7 +86,7 @@ func TestTwoFactorLogin_NeedsACodeAndTheMFATokenIsNoSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The password-step token must not work as a session.
-	if _, err := svc.ValidateToken(mfa); err == nil {
+	if _, err := svc.ValidateToken(mfa, testOpts.Client); err == nil {
 		t.Fatal("an mfa token was accepted as a session token")
 	}
 
@@ -94,21 +94,21 @@ func TestTwoFactorLogin_NeedsACodeAndTheMFATokenIsNoSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.CompleteTwoFactorLogin(u, "000000"); err == nil {
+	if _, err := svc.CompleteTwoFactorLogin(u, "000000", testOpts); err == nil {
 		t.Error("a wrong code signed in")
 	}
 	// The setup consumed this time step; the next one is the next valid code.
 	next := hotp(key, uint64(totpStep(time.Now())+1))
-	session, err := svc.CompleteTwoFactorLogin(u, next)
+	session, err := svc.CompleteTwoFactorLogin(u, next, testOpts)
 	if err != nil {
 		t.Fatalf("right code refused: %v", err)
 	}
-	if _, err := svc.ValidateToken(session); err != nil {
+	if _, err := svc.ValidateToken(session, testOpts.Client); err != nil {
 		t.Errorf("the session token from 2FA login is not valid: %v", err)
 	}
 	// And that code is spent.
 	u, _ = svc.MFAUser(mfa)
-	if _, err := svc.CompleteTwoFactorLogin(u, next); err == nil {
+	if _, err := svc.CompleteTwoFactorLogin(u, next, testOpts); err == nil {
 		t.Error("the same code signed in twice")
 	}
 }
@@ -133,7 +133,7 @@ func (s *AuthService) sessionToken0(t *testing.T) (*models.User, string, error) 
 	t.Helper()
 	var u models.User
 	s.db.First(&u, "id = ?", "u1")
-	tok, err := s.sessionToken(&u)
+	tok, err := s.issueSession(&u, testOpts)
 	return &u, tok, err
 }
 
@@ -144,17 +144,17 @@ func TestRecoveryCode_WorksOnceAndOnlyOnce(t *testing.T) {
 	var u models.User
 	svc.db.First(&u, "id = ?", "u1")
 	// Typed in capitals or without the dash is still the same code.
-	if _, err := svc.CompleteTwoFactorLogin(&u, strings.ToUpper(strings.ReplaceAll(codes[0], "-", ""))); err != nil {
+	if _, err := svc.CompleteTwoFactorLogin(&u, strings.ToUpper(strings.ReplaceAll(codes[0], "-", "")), testOpts); err != nil {
 		t.Fatalf("recovery code refused: %v", err)
 	}
 	svc.db.First(&u, "id = ?", "u1")
-	if _, err := svc.CompleteTwoFactorLogin(&u, codes[0]); err == nil {
+	if _, err := svc.CompleteTwoFactorLogin(&u, codes[0], testOpts); err == nil {
 		t.Error("a recovery code worked twice")
 	}
-	if _, err := svc.CompleteTwoFactorLogin(&u, codes[1]); err != nil {
+	if _, err := svc.CompleteTwoFactorLogin(&u, codes[1], testOpts); err != nil {
 		t.Errorf("another recovery code refused: %v", err)
 	}
-	if _, err := svc.CompleteTwoFactorLogin(&u, "aaaaa-bbbbb"); err == nil {
+	if _, err := svc.CompleteTwoFactorLogin(&u, "aaaaa-bbbbb", testOpts); err == nil {
 		t.Error("a made-up recovery code worked")
 	}
 }
@@ -192,7 +192,7 @@ func TestDisableTwoFactor_NeedsPasswordAndCode(t *testing.T) {
 		t.Fatalf("turn off: %v", err)
 	}
 	// Back to a plain password login.
-	if _, token, err := svc.Login("alice", "correct-horse"); err != nil || token == "" {
+	if _, token, err := svc.Login("alice", "correct-horse", testOpts); err != nil || token == "" {
 		t.Errorf("login after turning off: %v", err)
 	}
 }
@@ -206,7 +206,7 @@ func TestEnableTwoFactor_RefusesAWrongCode(t *testing.T) {
 		t.Error("enabled with a wrong code")
 	}
 	// Setup alone changes nothing about signing in.
-	if _, token, err := svc.Login("alice", "correct-horse"); err != nil || token == "" {
+	if _, token, err := svc.Login("alice", "correct-horse", testOpts); err != nil || token == "" {
 		t.Errorf("unconfirmed setup changed login: %v", err)
 	}
 }

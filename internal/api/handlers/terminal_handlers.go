@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
 )
@@ -55,7 +56,7 @@ func (h *TerminalHandlers) Terminal(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 		return
 	}
-	user, err := h.auth.ValidateToken(token)
+	user, err := h.auth.ValidateToken(token, middleware.ClientOf(c))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return

@@ -7,7 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/models"
+	"github.com/asdl/hub/internal/services"
 )
 
 // refuseIfLocked answers 429 when too many wrong codes or passwords have been
@@ -27,6 +29,7 @@ func (h *AuthHandlers) LoginTwoFactor(c *gin.Context) {
 	var req struct {
 		MFAToken string `json:"mfa_token" binding:"required"`
 		Code     string `json:"code" binding:"required"`
+		Remember bool   `json:"remember"`
 	}
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -40,7 +43,7 @@ func (h *AuthHandlers) LoginTwoFactor(c *gin.Context) {
 	if h.refuseIfLocked(c, user.Username) {
 		return
 	}
-	token, err := h.authService.CompleteTwoFactorLogin(user, req.Code)
+	token, err := h.authService.CompleteTwoFactorLogin(user, req.Code, services.SessionOptions{Client: middleware.ClientOf(c), Remember: req.Remember})
 	if err != nil {
 		h.limiter.Failed(c.ClientIP(), user.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})

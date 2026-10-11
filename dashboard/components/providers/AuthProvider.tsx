@@ -91,6 +91,8 @@ useEffect(() => {
   };
 
   const logout = () => {
+    // End the session on the Hub too, so the token stops working anywhere.
+    api.logout().catch(() => {});
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);

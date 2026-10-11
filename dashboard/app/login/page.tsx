@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { KeyRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { api } from '@/lib/api';
+import { getPasskey, passkeyError, passkeysSupported } from '@/lib/webauthn';
 
 interface NodeStatus {
   hostname: string;
@@ -28,10 +30,39 @@ export default function LoginPage() {
   const [mfaToken, setMfaToken] = useState('');
   const [code, setCode] = useState('');
   const [status, setStatus] = useState<ClusterStatus | null>(null);
+  // Stay signed in for 30 days instead of one. The choice is kept for next time.
+  const [remember, setRemember] = useState(false);
+  const [canPasskey, setCanPasskey] = useState(false);
 
   useEffect(() => {
     api.getStatus().then(setStatus).catch(() => null);
+    setCanPasskey(passkeysSupported());
+    try {
+      setRemember(localStorage.getItem('remember_me') === '1');
+    } catch {}
   }, []);
+
+  const changeRemember = (on: boolean) => {
+    setRemember(on);
+    try {
+      localStorage.setItem('remember_me', on ? '1' : '0');
+    } catch {}
+  };
+
+  const signInWithPasskey = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { ceremony, options } = await api.beginPasskeyLogin();
+      const credential = await getPasskey(options);
+      const response = await api.finishPasskeyLogin(ceremony, credential, remember);
+      login(response.token, response.user);
+    } catch (err) {
+      setError(passkeyError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,11 +70,11 @@ export default function LoginPage() {
     setError('');
     try {
       if (mfaToken) {
-        const response = await api.loginTwoFactor(mfaToken, code);
+        const response = await api.loginTwoFactor(mfaToken, code, remember);
         login(response.token, response.user);
         return;
       }
-      const response = await api.login(username, password);
+      const response = await api.login(username, password, remember);
       if (response.mfa_required) {
         setMfaToken(response.mfa_token);
         return;
@@ -195,6 +226,18 @@ export default function LoginPage() {
             </>
             )}
 
+            {!mfaToken && (
+              <label className="flex items-center gap-2 text-xs text-text-secondary select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => changeRemember(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                />
+                Remember me for 30 days
+              </label>
+            )}
+
             {error && (
               <div className="text-status-red text-xs text-center bg-status-red/10 border border-status-red/20 px-3 py-2 rounded-md">
                 {error}
@@ -216,6 +259,24 @@ export default function LoginPage() {
               >
                 Back
               </button>
+            )}
+            {!mfaToken && canPasskey && (
+              <>
+                <div className="flex items-center gap-3 text-[11px] text-text-muted">
+                  <span className="h-px flex-1 bg-border" />
+                  or
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={signInWithPasskey}
+                  className="w-full h-9 flex items-center justify-center gap-2 border border-border rounded-md text-sm text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-50"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Sign in with a passkey
+                </button>
+              </>
             )}
           </form>
 

@@ -20,8 +20,17 @@ func mustHash(t *testing.T, password string) string {
 	return string(hashed)
 }
 
+// testOpts is a sign-in from a desktop Firefox.
+var testOpts = SessionOptions{Client: Client{
+	IP:        "198.51.100.20",
+	UserAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+}}
+
+// cliClient is the command line asking.
+var cliClient = Client{IP: "198.51.100.8", UserAgent: "asdl-hub-cli"}
+
 func newAuthTestService(t *testing.T) *AuthService {
-	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{})
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
 	user := &models.User{
 		ID:       "u1",
 		Username: "alice",
@@ -38,7 +47,7 @@ func newAuthTestService(t *testing.T) *AuthService {
 func TestLogin_Success(t *testing.T) {
 	svc := newAuthTestService(t)
 
-	user, token, err := svc.Login("alice", "correct-horse")
+	user, token, err := svc.Login("alice", "correct-horse", testOpts)
 	if err != nil {
 		t.Fatalf("expected login to succeed, got error: %v", err)
 	}
@@ -53,7 +62,7 @@ func TestLogin_Success(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	svc := newAuthTestService(t)
 
-	if _, _, err := svc.Login("alice", "wrong-password"); err == nil {
+	if _, _, err := svc.Login("alice", "wrong-password", testOpts); err == nil {
 		t.Fatal("expected login with wrong password to fail")
 	}
 }
@@ -61,7 +70,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 func TestLogin_UnknownUser(t *testing.T) {
 	svc := newAuthTestService(t)
 
-	if _, _, err := svc.Login("nobody", "whatever"); err == nil {
+	if _, _, err := svc.Login("nobody", "whatever", testOpts); err == nil {
 		t.Fatal("expected login with unknown username to fail")
 	}
 }
@@ -69,12 +78,12 @@ func TestLogin_UnknownUser(t *testing.T) {
 func TestValidateToken_RoundTrip(t *testing.T) {
 	svc := newAuthTestService(t)
 
-	_, token, err := svc.Login("alice", "correct-horse")
+	_, token, err := svc.Login("alice", "correct-horse", testOpts)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
-	user, err := svc.ValidateToken(token)
+	user, err := svc.ValidateToken(token, testOpts.Client)
 	if err != nil {
 		t.Fatalf("expected token to validate, got error: %v", err)
 	}
@@ -86,7 +95,7 @@ func TestValidateToken_RoundTrip(t *testing.T) {
 func TestValidateToken_RejectsGarbage(t *testing.T) {
 	svc := newAuthTestService(t)
 
-	if _, err := svc.ValidateToken("not-a-real-token"); err == nil {
+	if _, err := svc.ValidateToken("not-a-real-token", testOpts.Client); err == nil {
 		t.Fatal("expected garbage token to be rejected")
 	}
 }
@@ -104,7 +113,7 @@ func TestValidateToken_RejectsExpiredToken(t *testing.T) {
 		t.Fatalf("sign expired token: %v", err)
 	}
 
-	if _, err := svc.ValidateToken(tokenString); err == nil {
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err == nil {
 		t.Fatal("expected expired token to be rejected")
 	}
 }
@@ -122,7 +131,7 @@ func TestValidateToken_RejectsTokenSignedWithWrongSecret(t *testing.T) {
 		t.Fatalf("sign forged token: %v", err)
 	}
 
-	if _, err := svc.ValidateToken(tokenString); err == nil {
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err == nil {
 		t.Fatal("expected token signed with the wrong secret to be rejected")
 	}
 }
@@ -157,7 +166,7 @@ func TestValidateToken_PermanentTokenResolvesToCreator(t *testing.T) {
 		t.Fatalf("seed permanent token: %v", err)
 	}
 
-	user, err := svc.ValidateToken(tokenString)
+	user, err := svc.ValidateToken(tokenString, testOpts.Client)
 	if err != nil {
 		t.Fatalf("expected permanent token to validate, got error: %v", err)
 	}
@@ -178,7 +187,7 @@ func TestValidateToken_RevokedPermanentTokenRejected(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	if _, err := svc.ValidateToken(tokenString); err == nil {
+	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err == nil {
 		t.Fatal("expected a revoked permanent token to be rejected")
 	}
 }
@@ -190,13 +199,13 @@ func TestValidateToken_RejectsOtherSigningMethods(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.ValidateToken(tok); err == nil {
+		if _, err := svc.ValidateToken(tok, testOpts.Client); err == nil {
 			t.Errorf("a token signed with %s was accepted", method.Alg())
 		}
 	}
 	// The one the Hub issues still works.
-	_, tok, _ := svc.Login("alice", "correct-horse")
-	if _, err := svc.ValidateToken(tok); err != nil {
+	_, tok, _ := svc.Login("alice", "correct-horse", testOpts)
+	if _, err := svc.ValidateToken(tok, testOpts.Client); err != nil {
 		t.Errorf("the Hub's own token was refused: %v", err)
 	}
 }

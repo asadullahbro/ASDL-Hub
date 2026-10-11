@@ -31,14 +31,40 @@ type User struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
+// Session is one signed-in browser (or command line). The session token
+// names it, so deleting the row signs that device out.
 type Session struct {
-	ID        string    `gorm:"primaryKey;size:36" json:"id"`
-	UserID    string    `gorm:"index;not null" json:"user_id"`
-	Token     string    `gorm:"uniqueIndex;size:500;not null" json:"token"`
-	IP        string    `gorm:"size:45" json:"ip"`
-	UserAgent string    `gorm:"size:255" json:"user_agent"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ID     string `gorm:"primaryKey;size:36" json:"id"`
+	UserID string `gorm:"index;not null" json:"user_id"`
+	// SHA-256 of the token, never the token itself.
+	Token     string `gorm:"uniqueIndex;size:500;not null" json:"-"`
+	IP        string `gorm:"size:45" json:"ip"` // where it signed in from
+	UserAgent string `gorm:"size:255" json:"user_agent"`
+	// Browser and OS, e.g. "Firefox on Linux". The token only works from a
+	// client that still matches.
+	Device     string    `gorm:"size:100;not null;default:''" json:"device"`
+	Method     string    `gorm:"size:20;not null;default:''" json:"method"` // password, passkey or cli
+	Remember   bool      `gorm:"not null;default:false" json:"remember"`
+	LastIP     string    `gorm:"size:45;not null;default:''" json:"last_ip"`
+	LastUsedAt time.Time `json:"last_used_at"`
+	ExpiresAt  time.Time `gorm:"index" json:"expires_at"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Passkey is a WebAuthn credential a user signs in with instead of a
+// password and code.
+type Passkey struct {
+	ID     string `gorm:"primaryKey;size:36" json:"id"`
+	UserID string `gorm:"index;size:36;not null" json:"-"`
+	Name   string `gorm:"size:100;not null" json:"name"`
+	// base64url of the credential ID the authenticator reports.
+	CredentialID string `gorm:"uniqueIndex;size:1400;not null" json:"-"`
+	// The domain it was made for; it only signs in there.
+	RPID string `gorm:"size:255;not null" json:"rp_id"`
+	// The webauthn.Credential as JSON: public key, sign count, flags.
+	Credential string     `gorm:"type:text;not null" json:"-"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
 }
 
 // Setting — generic key/value store for global config

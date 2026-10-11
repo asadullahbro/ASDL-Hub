@@ -164,7 +164,11 @@ func (h *SettingsHandlers) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.settings.ChangePassword(id, req.Password); err != nil {
+	keep := ""
+	if u := currentUser(c); u != nil && u.ID == id {
+		keep = currentSessionID(c)
+	}
+	if err := h.settings.ChangePassword(id, req.Password, keep); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
