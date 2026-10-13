@@ -20,6 +20,9 @@ type JobService struct {
 	// onRoutesChanged is called after a deploy changes which node serves a
 	// project, so nginx can be regenerated. Optional.
 	onRoutesChanged func()
+
+	// logs carries a running job's output to the browsers watching it
+	logs *JobLogHub
 }
 
 // SetRoutesChangedHook registers fn to run (in the background) whenever a
@@ -30,7 +33,8 @@ func (s *JobService) SetRoutesChangedHook(fn func()) {
 
 func NewJobService(db *gorm.DB) *JobService {
 	return &JobService{
-		db: db,
+		db:   db,
+		logs: NewJobLogHub(),
 	}
 }
 
@@ -153,6 +157,7 @@ func (s *JobService) Complete(c *gin.Context) {
 	// The environment can hold secrets and is only needed while the job runs.
 	job.Environment = nil
 	s.db.Save(&job)
+	s.logs.Finish(job.ID, job.Status)
 
 	// Failovers and migrations are deploy jobs now; older ones used the
 	// migrate_start/failover_start types. Either way the job ID links them.

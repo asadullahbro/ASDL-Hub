@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { Job } from '@/types';
 import { JobStatusBadge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { jobTypeLabel } from '@/lib/labels';
+import { useJobStream } from './useJobStream';
 
 interface JobDetailsModalProps {
   jobId: string | null;
@@ -19,18 +20,35 @@ export function JobDetailsModal({ jobId, open, onClose, nodeNames = {} }: JobDet
   const [logs, setLogs] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const outputRef = useRef<HTMLPreElement>(null);
+  const stickToBottom = useRef(true);
+
+  const load = useCallback((showLoading: boolean) => {
+    if (!jobId) return;
+    if (showLoading) setLoading(true);
+    Promise.all([api.getJob(jobId), api.getJobLogs(jobId)])
+      .then(([jobData, logsData]) => {
+        setJob(jobData);
+        setLogs(logsData.logs);
+      })
+      .catch(() => setJob(null))
+      .finally(() => setLoading(false));
+  }, [jobId]);
+
   useEffect(() => {
-    if (open && jobId) {
-      setLoading(true);
-      Promise.all([api.getJob(jobId), api.getJobLogs(jobId)])
-        .then(([jobData, logsData]) => {
-          setJob(jobData);
-          setLogs(logsData.logs);
-        })
-        .catch(() => setJob(null))
-        .finally(() => setLoading(false));
-    }
-  }, [open, jobId]);
+    if (open && jobId) load(true);
+  }, [open, jobId, load]);
+
+  // A pending or running job streams its output; when it ends, load the final record
+  const running = !!open && (job?.status === 'running' || job?.status === 'pending');
+  const stream = useJobStream(jobId, running, () => load(false));
+  const output = running && stream.text ? stream.text : logs;
+
+  // Follow new output, unless the reader scrolled up to look at something
+  useEffect(() => {
+    const el = outputRef.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [output]);
 
   if (!open) return null;
   const duration =
@@ -61,8 +79,23 @@ export function JobDetailsModal({ jobId, open, onClose, nodeNames = {} }: JobDet
             <pre className="font-mono text-xs text-text-secondary bg-background p-3 rounded-md border border-border overflow-x-auto whitespace-pre-wrap max-h-32">{command}</pre>
           </div>
           <div>
-            <div className="text-xs text-text-secondary mb-1.5">Output</div>
-            <pre className="font-mono text-xs text-text-secondary bg-background p-3 rounded-md border border-border overflow-auto max-h-80 whitespace-pre-wrap">{logs || 'No output.'}</pre>
+            <div className="text-xs text-text-secondary mb-1.5 flex items-center gap-2">
+              Output
+              {stream.live && (
+                <span className="inline-flex items-center gap-1 text-status-green">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-green animate-pulse" />
+                  Live
+                </span>
+              )}
+            </div>
+            <pre
+              ref={outputRef}
+              onScroll={e => {
+                const el = e.currentTarget;
+                stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+              }}
+              className="font-mono text-xs text-text-secondary bg-background p-3 rounded-md border border-border overflow-auto max-h-80 whitespace-pre-wrap"
+            >{output || (running ? 'Waiting for output…' : 'No output.')}</pre>
           </div>
         </>
       )}

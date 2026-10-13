@@ -313,6 +313,7 @@ For the command line, run: asdl-hub help
 			mesh.POST("/nodes/:id/heartbeat", nodeService.Heartbeat)
 			mesh.POST("/nodes/:id/maintenance", nodeOps.SetMaintenanceFromNode)
 			mesh.POST("/jobs/claim", jobService.Claim)
+			mesh.POST("/jobs/:id/logs", jobService.AppendLogs)
 			mesh.POST("/jobs/:id/complete", jobService.Complete)
 		}
 
@@ -444,6 +445,7 @@ For the command line, run: asdl-hub help
 			viewer.GET("/jobs", jobService.List)
 			viewer.GET("/jobs/:id", jobService.Get)
 			viewer.GET("/jobs/:id/logs", jobService.GetLogs)
+			viewer.GET("/jobs/:id/stream", jobService.Stream)
 
 			viewer.GET("/containers", containerService.ListContainers)
 			viewer.GET("/containers/:id", containerService.GetContainer)
