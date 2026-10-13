@@ -99,6 +99,38 @@ func TestDeployComplete_IgnoresSupersededDeploy(t *testing.T) {
 	}
 }
 
+// A migration to "new" is overtaken by a CI deploy to "old"; when the migration
+// then finishes it leaves a container on "new" that nothing manages.
+func TestDeployComplete_SupersededDeployElsewhereLeavesNoStrayCopy(t *testing.T) {
+	svc, db := setupDeploy(t, "old")
+	db.Create(&models.Deployment{ID: "newer", JobID: "j2", NodeID: "old", ImageName: "img:v3"})
+	db.Model(&models.Project{}).Where("id = ?", "p1").Update("deployment_id", "newer")
+	completeJob(t, svc, models.JobStatusCompleted)
+
+	var stop models.Job
+	if err := db.First(&stop, "node_id = ? AND type = ?", "new", models.JobTypeFailoverStop).Error; err != nil {
+		t.Fatalf("expected the stray copy on the node the superseded deploy used to be removed: %v", err)
+	}
+	var p models.Project
+	db.First(&p, "id = ?", "p1")
+	if p.NodeID != "old" {
+		t.Errorf("project moved to %q, want it to stay on old", p.NodeID)
+	}
+}
+
+func TestDeployComplete_SupersededDeployOnSameNodeIsLeftForTheNewerOne(t *testing.T) {
+	svc, db := setupDeploy(t, "old")
+	db.Create(&models.Deployment{ID: "newer", JobID: "j2", NodeID: "new", ImageName: "img:v3"})
+	db.Model(&models.Project{}).Where("id = ?", "p1").Update("deployment_id", "newer")
+	completeJob(t, svc, models.JobStatusCompleted)
+
+	var n int64
+	db.Model(&models.Job{}).Where("type = ?", models.JobTypeFailoverStop).Count(&n)
+	if n != 0 {
+		t.Errorf("a newer deploy to the same node will replace the container; got %d stop jobs", n)
+	}
+}
+
 func TestJobGet_RedactsEnvironment(t *testing.T) {
 	svc, _ := setupDeploy(t, "old")
 	c, w := newTestContext(http.MethodGet, "/jobs/j1", "")

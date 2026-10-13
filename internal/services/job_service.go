@@ -216,8 +216,14 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 		log.Printf("⚠️ No project for deployment %s: %v", dep.ID, err)
 		return
 	}
-	// A newer deploy has been dispatched since this one; let that one decide.
+	// A newer deploy has been dispatched since this one; let that one decide
+	// where the project runs. But if this one succeeded on a node that the
+	// newer deploy is not using, its container is now a stray copy of the
+	// project (two bots on one token, for example): remove it.
 	if project.DeploymentID != "" && project.DeploymentID != dep.ID {
+		if succeeded {
+			s.removeStrayCopy(&project, &dep, job.NodeID, now)
+		}
 		return
 	}
 
@@ -305,6 +311,34 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 		}
 	}
 	s.routesChanged()
+}
+
+// removeStrayCopy queues removal of project's container (and companions) on
+// nodeID, which a superseded deploy just started, unless the deploy that
+// superseded it targets that same node (it will replace the container).
+func (s *JobService) removeStrayCopy(project *models.Project, dep *models.Deployment, nodeID string, now time.Time) {
+	var newer models.Deployment
+	if s.db.First(&newer, "id = ?", project.DeploymentID).Error == nil {
+		if newer.NodeID == nodeID {
+			return
+		}
+	} else if project.NodeID == nodeID {
+		return // can't tell what superseded it; the project is recorded here, so keep it
+	}
+	stop := &models.Job{
+		ID:         uuid.New().String(),
+		NodeID:     nodeID,
+		Type:       models.JobTypeFailoverStop,
+		Status:     models.JobStatusPending,
+		Command:    BuildRemoveProjectCommand(project),
+		MaxRetries: 2,
+		CreatedAt:  now,
+	}
+	if err := s.db.Create(stop).Error; err != nil {
+		log.Printf("⚠️ Failed to queue removal of stray %s copy on node %s: %v", project.Name, nodeID, err)
+		return
+	}
+	log.Printf("🧹 Deploy %s of %s finished on %s after a newer deploy took over; removing that copy", dep.ID, project.Name, s.nodeName(nodeID))
 }
 
 func (s *JobService) nodeName(id string) string {
