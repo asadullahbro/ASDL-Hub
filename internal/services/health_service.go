@@ -164,7 +164,7 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 		return
 	}
 
-	image := project.Image
+	image := s.failoverImage(project)
 	if image == "" {
 		log.Printf("❌ %s has no image to fail over with", project.Name)
 		s.announceDown(project, "and it has no image to start elsewhere.")
@@ -206,6 +206,22 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 		log.Printf("⚠️ Failed to record failover of %s: %v", project.Name, err)
 	}
 	s.db.Model(project).Update("health_status", "migrating")
+}
+
+// failoverImage is the image a failover should start. project.Image is only
+// updated when a deploy finishes, so a failover that fires while a CI deploy
+// is still running would bring back the previous version. A deploy that is
+// pending or running is the newest intent; use its image.
+func (s *HealthService) failoverImage(project *models.Project) string {
+	if project.DeploymentID != "" {
+		var dep models.Deployment
+		if s.db.First(&dep, "id = ?", project.DeploymentID).Error == nil &&
+			dep.ImageName != "" &&
+			(dep.Status == models.DeploymentStatusPending || dep.Status == models.DeploymentStatusRunning) {
+			return dep.ImageName
+		}
+	}
+	return project.Image
 }
 
 // failoverTarget returns the best online node for project other than its
