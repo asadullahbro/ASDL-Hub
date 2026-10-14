@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { Job } from '@/types';
 import { JobTable } from '@/components/jobs/JobTable';
 import { Button } from '@/components/ui/Button';
-import { ListTodo, Plus } from 'lucide-react';
+import { ListTodo, Plus, RefreshCw } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { CreateJobModal } from '@/components/jobs/CreateJobModal';
@@ -29,21 +29,34 @@ export default function JobsPage() {
   }, []);
   const limit = 20;
 
-  async function loadJobs() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  // `silent` refreshes (the 5 s timer) keep the current list on a hiccup instead of replacing the page with an error
+  async function loadJobs(silent = false) {
+    if (!silent) setRefreshing(true);
     try {
       const response = await api.getJobs(page, limit);
       setJobs(response.data);
       setPagination(response.pagination);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load jobs');
+      if (!silent) setError(err instanceof Error ? err.message : 'Failed to load jobs');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
     loadJobs();
+  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto refresh every 5 seconds, paused while the tab is hidden
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!document.hidden) loadJobs(true);
+    }, 5000);
+    return () => clearInterval(timer);
   }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -75,9 +88,14 @@ export default function JobsPage() {
         title="Jobs"
         description={`Everything the Hub has asked a node to do: deploys, moves, logs and commands. ${pagination.total} in total.`}
         actions={
-          <Button variant="primary" icon={Plus} onClick={() => setShowCreateModal(true)}>
-            New job
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" icon={RefreshCw} onClick={() => loadJobs()} disabled={refreshing}>
+              Refresh
+            </Button>
+            <Button variant="primary" icon={Plus} onClick={() => setShowCreateModal(true)}>
+              New job
+            </Button>
+          </div>
         }
       />
 
