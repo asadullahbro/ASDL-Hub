@@ -21,7 +21,21 @@ const (
 	failoverThreshold   = 3
 	healthCheckInterval = 10 * time.Second
 	healthCheckTimeout  = 3 * time.Second
+	// startupGrace is how long after a deploy an app may still be starting. Apps with a slow start (a bot
+	// that registers commands and runs migrations) refuse connections for a while; those checks must not
+	// count as failures, or the Hub marks a healthy app failed and gives up on it.
+	startupGrace = 3 * time.Minute
 )
+
+// inStartupGrace reports whether a project deployed at lastDeployed is still within its startup window.
+// A zero time (never deployed through the Hub) is never in grace.
+func inStartupGrace(lastDeployed, now time.Time) bool {
+	if lastDeployed.IsZero() {
+		return false
+	}
+	d := now.Sub(lastDeployed)
+	return d >= 0 && d < startupGrace
+}
 
 type HealthService struct {
 	db               *gorm.DB
@@ -95,6 +109,15 @@ func (s *HealthService) checkAllProjects() {
 					URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
 				})
 			}
+			continue
+		}
+
+		// Still starting up after a deploy: not a failure yet, just not answering so far
+		if inStartupGrace(project.LastDeployed, time.Now()) {
+			if project.HealthStatus != "degraded" {
+				s.db.Model(&project).Update("health_status", "degraded")
+			}
+			log.Printf("⏳ Project %s is still starting (deployed %s ago), not counting this check", project.Name, time.Since(project.LastDeployed).Round(time.Second))
 			continue
 		}
 
