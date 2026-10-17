@@ -51,6 +51,8 @@ type HealthService struct {
 	// failingSince holds when each project's current run of failed checks
 	// began. Only the checker goroutine touches it.
 	failingSince map[string]time.Time
+	// recovering counts consecutive good checks per failed project. Only the checker goroutine touches it.
+	recovering map[string]int
 }
 
 func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService, deployer *Deployer) *HealthService {
@@ -60,6 +62,7 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 		nginxService:     nginxService,
 		deployer:         deployer,
 		failures:         make(map[string]int),
+		recovering:       make(map[string]int),
 		down:             make(map[string]time.Time),
 		failingSince:     make(map[string]time.Time),
 	}
@@ -75,7 +78,52 @@ func (s *HealthService) StartHealthChecker() {
 	}()
 }
 
+// recoveryChecks is how many consecutive good checks a failed project needs before it is put back in service.
+const recoveryChecks = 2
+
+// recoveryReached reports whether a failed project has answered enough times in a row to be restored.
+// It updates the per-project counter: a good check adds one, a bad one resets it.
+func recoveryReached(counts map[string]int, id string, ok bool) bool {
+	if !ok {
+		delete(counts, id)
+		return false
+	}
+	counts[id]++
+	if counts[id] >= recoveryChecks {
+		delete(counts, id)
+		return true
+	}
+	return false
+}
+
+// recoverFailed re-checks projects marked failed. One that answers again (it was only slow to start, or the
+// node came back) is set running again and routed to, instead of staying down until someone redeploys it.
+func (s *HealthService) recoverFailed() {
+	var projects []models.Project
+	s.db.Where("status = ?", "failed").Find(&projects)
+	for i := range projects {
+		project := &projects[i]
+		if !recoveryReached(s.recovering, project.ID, s.checkProjectHealth(project)) {
+			continue
+		}
+		log.Printf("✅ Project %s answers again, putting it back in service", project.Name)
+		s.db.Model(project).Updates(map[string]interface{}{"status": "running", "health_status": "healthy"})
+		if err := s.nginxService.UpdateNginxConfig(); err != nil {
+			log.Printf("⚠️ Failed to update Nginx config: %v", err)
+		}
+		node := s.nodeName(project.NodeID)
+		delete(s.down, project.ID)
+		notify(Event{
+			Type: EventAppRecovered, Level: LevelSuccess,
+			Title:   project.Name + " is back up",
+			Message: fmt.Sprintf("%s was marked failed but answers again on %s, so it is back in service.", project.Name, node),
+			URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
+		})
+	}
+}
+
 func (s *HealthService) checkAllProjects() {
+	s.recoverFailed()
 	var projects []models.Project
 	s.db.Where("status = ?", "running").Find(&projects)
 
