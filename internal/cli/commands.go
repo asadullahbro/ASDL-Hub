@@ -72,6 +72,32 @@ func (c *client) nodes() ([]node, error) {
 	return out, c.do("GET", "/nodes", nil, &out)
 }
 
+// nodeUptime is a node's availability (GET /nodes/uptime). Older Hubs don't have it.
+type nodeUptime struct {
+	NodeID     string   `json:"node_id"`
+	Uptime7d   *float64 `json:"uptime_7d"`
+	LastOutage *struct {
+		StartedAt time.Time  `json:"started_at"`
+		EndedAt   *time.Time `json:"ended_at"`
+		Seconds   int64      `json:"seconds"`
+	} `json:"last_outage"`
+}
+
+// uptimes is best effort: an older Hub without the endpoint just gives no columns' worth of data.
+func (c *client) uptimes() map[string]nodeUptime {
+	var out struct {
+		Nodes []nodeUptime `json:"nodes"`
+	}
+	if c.do("GET", "/nodes/uptime", nil, &out) != nil {
+		return nil
+	}
+	m := make(map[string]nodeUptime, len(out.Nodes))
+	for _, u := range out.Nodes {
+		m[u.NodeID] = u
+	}
+	return m
+}
+
 func (c *client) projects() ([]project, error) {
 	var out struct {
 		Data []project `json:"data"`
@@ -249,13 +275,49 @@ func (e *env) nodes(c *client) error {
 	for _, p := range apps {
 		count[p.NodeID]++
 	}
+	up := c.uptimes()
 	w := e.table()
-	fmt.Fprintln(w, "NODE\tSTATE\tADDRESS\tAGENT\tMEMORY GB\tDISK GB\tAPPS\tLAST SEEN")
+	fmt.Fprintln(w, "NODE\tSTATE\tADDRESS\tAGENT\tMEMORY GB\tDISK GB\tAPPS\tLAST SEEN\tUPTIME 7D\tLAST OUTAGE")
 	for _, n := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s/%s\t%s/%s\t%d\t%s\n", n.Hostname, e.nodeState(n), n.VPNIP, orDash(n.AgentVersion),
-			gb(n.MemoryUsed), gb(n.MemoryTotal), gb(n.DiskUsed), gb(n.DiskTotal), count[n.ID], ago(n.LastHeartbeat))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s/%s\t%s/%s\t%d\t%s\t%s\t%s\n", n.Hostname, e.nodeState(n), n.VPNIP, orDash(n.AgentVersion),
+			gb(n.MemoryUsed), gb(n.MemoryTotal), gb(n.DiskUsed), gb(n.DiskTotal), count[n.ID], ago(n.LastHeartbeat),
+			uptimeCell(up[n.ID]), lastOutageCell(up[n.ID]))
 	}
 	return w.Flush()
+}
+
+// uptimeCell is "99.37%", or "-" when the Hub has none (a node that never reported, or an older Hub).
+func uptimeCell(u nodeUptime) string {
+	if u.Uptime7d == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f%%", *u.Uptime7d)
+}
+
+// lastOutageCell is how long the node's latest outage lasted and when it was, or "ongoing" while it is down.
+func lastOutageCell(u nodeUptime) string {
+	o := u.LastOutage
+	if o == nil {
+		return "-"
+	}
+	if o.EndedAt == nil {
+		return "ongoing, " + duration(time.Since(o.StartedAt))
+	}
+	return duration(time.Duration(o.Seconds)*time.Second) + ", " + ago(*o.EndedAt)
+}
+
+// duration is a length of time in its two largest units: "2d 3h", "4h 5m", "2m 38s", "45s".
+func duration(d time.Duration) string {
+	s := int64(d.Seconds())
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm %ds", s/60, s%60)
+	case s < 86400:
+		return fmt.Sprintf("%dh %dm", s/3600, s%3600/60)
+	}
+	return fmt.Sprintf("%dd %dh", s/86400, s%86400/3600)
 }
 
 func orDash(s string) string {
