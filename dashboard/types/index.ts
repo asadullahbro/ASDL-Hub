@@ -171,6 +171,32 @@ export interface NodeDetail {
   containers: Container[];
   project_count: number;
   container_count: number;
+  // Added with outage tracking; absent when talking to an older Hub.
+  uptime?: NodeUptime;
+  outages?: NodeOutage[];
+  tracked_since?: string;
+}
+
+// One stretch during which a node sent no heartbeats.
+export interface NodeOutage {
+  id: number;
+  node_id: string;
+  started_at: string;
+  ended_at: string | null; // null while the node is still offline
+  seconds: number;
+}
+
+export interface NodeUptime {
+  node_id: string;
+  uptime_7d: number | null; // null for a node that never reported
+  uptime_30d: number | null;
+  outages_7d: number;
+  last_outage: NodeOutage | null;
+}
+
+export interface NodesUptime {
+  tracked_since: string; // outages before this were never recorded
+  nodes: NodeUptime[];
 }
 
 export interface Migration {

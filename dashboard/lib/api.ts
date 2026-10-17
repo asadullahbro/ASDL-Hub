@@ -9,6 +9,7 @@ import {
   LoginResponse,
   Project,
   NodeDetail,
+  NodesUptime,
   Migration,
   ProjectHealth,
   PaginatedResponse,
@@ -274,6 +275,13 @@ export const api = {
 
   getNodeDetails: (id: string): Promise<NodeDetail> =>
     request<NodeDetail>(`/nodes/${id}`),
+
+  // Availability of every node, and one node's outage history (Hubs from v0.17.0)
+  getNodesUptime: (): Promise<NodesUptime> =>
+    request<NodesUptime>('/nodes/uptime'),
+
+  getNodeOutages: (id: string): Promise<NodeDetail> =>
+    request<NodeDetail>(`/nodes/${id}/details`),
 
   getProjectsByNode: (nodeId: string): Promise<Project[]> =>
     request<Project[]>(`/nodes/${nodeId}/projects`),

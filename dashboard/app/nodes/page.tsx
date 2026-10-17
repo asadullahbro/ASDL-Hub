@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Node } from '@/types';
+import { Node, NodeUptime } from '@/types';
+import { formatDuration, uptimeColor } from '@/components/nodes/NodeOutages';
 import Link from 'next/link';
 import { Activity, Cpu, Plus, RefreshCw, Server } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -34,6 +35,7 @@ function Meter({ label, used, total }: { label: string; used?: number; total?: n
 
 export default function NodesPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [uptime, setUptime] = useState<Record<string, NodeUptime>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +50,10 @@ export default function NodesPage() {
       });
       setNodes(sorted);
       setError(null);
+      // Best effort: a Hub older than v0.17.0 has no uptime, and the cards just omit it
+      api.getNodesUptime()
+        .then(r => setUptime(Object.fromEntries(r.nodes.map(u => [u.node_id, u]))))
+        .catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load nodes');
     } finally {
@@ -120,6 +126,24 @@ export default function NodesPage() {
                     </span>
                   )}
                 </div>
+
+                {uptime[node.id]?.uptime_7d != null && (
+                  <div className="flex items-center justify-between gap-3 mt-4 text-xs text-text-secondary">
+                    <span>
+                      Uptime, 7 days{' '}
+                      <span className={`font-medium ${uptimeColor(uptime[node.id].uptime_7d)}`}>
+                        {uptime[node.id].uptime_7d!.toFixed(2)}%
+                      </span>
+                    </span>
+                    {uptime[node.id].last_outage && (
+                      <span className={uptime[node.id].last_outage!.ended_at ? '' : 'text-status-red'}>
+                        {uptime[node.id].last_outage!.ended_at
+                          ? `last outage ${formatDuration(uptime[node.id].last_outage!.seconds)}`
+                          : `offline ${formatDuration((Date.now() - new Date(uptime[node.id].last_outage!.started_at).getTime()) / 1000)}`}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-2.5 mt-4 pt-4 border-t border-border">
                   <Meter label="Memory" used={node.memory_used} total={node.memory_total} />
