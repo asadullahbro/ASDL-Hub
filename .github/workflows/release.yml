@@ -124,6 +124,7 @@ jobs:
           path: |
             scripts/install.sh
             scripts/install.ps1
+            scripts/migrate-to-embedded.sh
 
   # The command line (the same program as the Hub) for systems the Hub itself
   # doesn't run on; Linux's plain binaries come from the build job above.
@@ -210,7 +211,7 @@ jobs:
 
       - name: Generate checksums
         working-directory: release
-        run: sha256sum *.tar.gz asdl-hub-linux-* asdl-hub-darwin-* asdl-hub-windows-* install.sh install.ps1 > SHA256SUMS
+        run: sha256sum *.tar.gz asdl-hub-linux-* asdl-hub-darwin-* asdl-hub-windows-* install.sh install.ps1 migrate-to-embedded.sh > SHA256SUMS
 
       - name: Write release notes
         run: |
@@ -242,3 +243,4 @@ jobs:
             release/SHA256SUMS
             release/install.sh
             release/install.ps1
+            release/migrate-to-embedded.sh
