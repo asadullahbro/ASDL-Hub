@@ -51,6 +51,8 @@ type HealthService struct {
 	// failingSince holds when each project's current run of failed checks
 	// began. Only the checker goroutine touches it.
 	failingSince map[string]time.Time
+	// restarts holds when each project was last restarted in place, to cap the attempts. Only the checker goroutine touches it.
+	restarts map[string][]time.Time
 	// recovering counts consecutive good checks per failed project. Only the checker goroutine touches it.
 	recovering map[string]int
 }
@@ -63,6 +65,7 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 		deployer:         deployer,
 		failures:         make(map[string]int),
 		recovering:       make(map[string]int),
+		restarts:         make(map[string][]time.Time),
 		down:             make(map[string]time.Time),
 		failingSince:     make(map[string]time.Time),
 	}
@@ -76,6 +79,65 @@ func (s *HealthService) StartHealthChecker() {
 			s.checkAllProjects()
 		}
 	}()
+}
+
+const (
+	// maxInPlaceRestarts is how many times an app is restarted on its own node within restartWindow before the
+	// Hub gives up: a crash loop (a bad image, a broken config) won't be fixed by restarting it again.
+	maxInPlaceRestarts = 2
+	restartWindow      = 30 * time.Minute
+)
+
+// restartAllowed reports whether another in-place restart is allowed, given the times of earlier ones, and
+// returns the attempts that still count (those inside the window).
+func restartAllowed(history []time.Time, now time.Time) (bool, []time.Time) {
+	recent := history[:0:0]
+	for _, t := range history {
+		if now.Sub(t) < restartWindow {
+			recent = append(recent, t)
+		}
+	}
+	return len(recent) < maxInPlaceRestarts, recent
+}
+
+// deployInProgress reports whether the project has a deploy that is still pending or running.
+func (s *HealthService) deployInProgress(project *models.Project) bool {
+	if project.DeploymentID == "" {
+		return false
+	}
+	var dep models.Deployment
+	if s.db.First(&dep, "id = ?", project.DeploymentID).Error != nil {
+		return false
+	}
+	return dep.Status == models.DeploymentStatusPending || dep.Status == models.DeploymentStatusRunning
+}
+
+// restartInPlace redeploys the project's image on the node it already runs on, for an app that stopped
+// answering while its node is still online (a crashed container, not a lost node). It reports whether it
+// took over: true means a restart was queued or is already underway, false means the caller should give up.
+func (s *HealthService) restartInPlace(project *models.Project, image string) bool {
+	var node models.Node
+	if s.db.First(&node, "id = ?", project.NodeID).Error != nil || !node.Online {
+		return false
+	}
+	if s.deployInProgress(project) {
+		log.Printf("⏳ %s already has a deploy underway, waiting for it", project.Name)
+		return true
+	}
+	ok, recent := restartAllowed(s.restarts[project.ID], time.Now())
+	s.restarts[project.ID] = recent
+	if !ok {
+		log.Printf("❌ %s was already restarted %d times in %s and is still down", project.Name, maxInPlaceRestarts, restartWindow)
+		return false
+	}
+	log.Printf("🔁 Restarting %s on %s (it stopped answering but the node is online)", project.Name, node.Hostname)
+	if _, _, err := s.deployer.Dispatch(project, &node, image, DeployMeta{Trigger: TriggerFailover, Repository: project.Repository}); err != nil {
+		log.Printf("❌ Failed to queue the restart of %s: %v", project.Name, err)
+		return false
+	}
+	s.restarts[project.ID] = append(s.restarts[project.ID], time.Now())
+	s.db.Model(project).Update("health_status", "degraded")
+	return true
 }
 
 // recoveryChecks is how many consecutive good checks a failed project needs before it is put back in service.
@@ -245,6 +307,10 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 
 	target := s.failoverTarget(project)
 	if target == nil {
+		// Nowhere else to go: if its own node is up, the container probably crashed, so start it again there
+		if s.restartInPlace(project, image) {
+			return
+		}
 		log.Printf("❌ No node left to run %s; marking it failed", project.Name)
 		s.announceDown(project, "and no other node can take it over, so it stays down until one can or it recovers.")
 		s.markFailed(project)
