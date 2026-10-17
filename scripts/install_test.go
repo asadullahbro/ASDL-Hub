@@ -61,3 +61,55 @@ func TestInstall_WithoutATerminalItStillMeansTheHub(t *testing.T) {
 		t.Errorf("asked a question with nobody to answer:\n%s", out)
 	}
 }
+
+// detectDBMode runs install.sh's detect_db_mode against an install folder with the given .env
+// (nil means a fresh machine), and returns the mode it chose, or the failure message.
+func detectDBMode(t *testing.T, envFile *string, asked string) (mode string, ok bool) {
+	t.Helper()
+	dir := t.TempDir()
+	if envFile != nil {
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(*envFile), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `
+info(){ :; }
+die(){ echo "DIE: $*"; exit 1; }
+eval "$(sed -n '/^detect_db_mode() {/,/^}/p' install.sh)"
+INSTALL_DIR="` + dir + `"; DB_MODE=""
+detect_db_mode
+echo "MODE=$DB_MODE"
+`
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "ASDL_DB="+asked)
+	out, err := cmd.CombinedOutput()
+	s := string(out)
+	if err != nil {
+		return s, false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(s, "MODE=")), true
+}
+
+func TestInstall_DatabaseMode(t *testing.T) {
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name   string
+		env    *string
+		asked  string
+		want   string // the mode, or text the failure must contain
+		wantOK bool
+	}{
+		{"a new Hub runs its own database", nil, "", "embedded", true},
+		{"a new Hub can still ask for the system's PostgreSQL", nil, "external", "external", true},
+		{"an installed Hub with the system's PostgreSQL keeps it", str("DB_HOST=127.0.0.1\nDB_PORT=5432\n"), "", "external", true},
+		{"an installed Hub with its own database keeps it", str("DB_EMBEDDED=true\nDB_PORT=54329\n"), "", "embedded", true},
+		{"an installed external Hub is never switched to an empty embedded database", str("DB_HOST=127.0.0.1\n"), "embedded", "empty database", false},
+		{"an unknown choice is refused", nil, "sqlite", "must be 'embedded' or 'external'", false},
+	}
+	for _, c := range cases {
+		got, ok := detectDBMode(t, c.env, c.asked)
+		if ok != c.wantOK || (c.wantOK && got != c.want) || (!c.wantOK && !strings.Contains(got, c.want)) {
+			t.Errorf("%s: got %q (ok=%v), want %q (ok=%v)", c.name, got, ok, c.want, c.wantOK)
+		}
+	}
+}

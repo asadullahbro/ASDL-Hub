@@ -53,7 +53,7 @@ machine automatically if its own goes down.
                         │  https://your-app.example.com
                         ▼
           ┌───────────────────────────┐
-          │          ASDL Hub         │   dashboard + API · PostgreSQL
+          │          ASDL Hub         │   dashboard + API · its own PostgreSQL
           │   (your server, public)   │   nginx: domains + certificates
           └─────────────┬─────────────┘
                         │  WireGuard mesh
@@ -78,9 +78,11 @@ curl -fsSL https://get.asdl.website/asdl-hub | sudo bash
 ```
 
 The installer asks whether to install the Hub or only the `asdl-hub` command
-line. Choose the Hub: it sets up PostgreSQL, WireGuard, nginx, the firewall,
+line. Choose the Hub: it sets up WireGuard, nginx, the firewall,
 HTTPS for the dashboard and the Hub itself, then prints your dashboard URL and
-admin login. A domain is optional — without one the Hub uses the server's IP.
+admin login. The Hub runs its own PostgreSQL inside its one service (nothing to
+install or start separately); a Hub installed earlier keeps using the system's
+PostgreSQL until you move it with `scripts/migrate-to-embedded.sh`. A domain is optional — without one the Hub uses the server's IP.
 
 To manage a Hub from another machine, install just the command line there. It
 works on Linux, macOS and Windows (the Hub itself needs Linux):

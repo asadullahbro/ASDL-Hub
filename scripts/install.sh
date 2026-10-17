@@ -14,12 +14,17 @@ set -Eeuo pipefail
 #   ASDL_BIN_DIR      where the command line goes (default /usr/local/bin as
 #                     root, else ~/.local/bin)
 #   ASDL_CLI_VERSION  a release to install the command line from, such as v0.14.0
+#   ASDL_DB           embedded (the default for a new Hub: it runs its own PostgreSQL
+#                     inside the asdl-hub service) or external (use the system's
+#                     PostgreSQL). A Hub that is already installed keeps the database
+#                     it has; move one over with scripts/migrate-to-embedded.sh.
 
 APP_NAME="ASDL Hub"
 ASDL_VERSION=""  # stamped at release time by CI
 INSTALL_DIR="/opt/asdl-hub"
 SERVICE_NAME="asdl-hub"
 RUN_USER="asdl-hub"
+DB_MODE=""  # embedded or external, set by detect_db_mode
 WG_INTERFACE="asdl0"
 WG_PORT_HINT="${ASDL_WG_PORT:-51820}"
 WG_PORT=""  # set by find_free_port
@@ -412,17 +417,37 @@ prepare_source() {
     ok "Downloaded ASDL Hub $version."
 }
 
+# Decides where the Hub's database lives. A new Hub runs its own PostgreSQL inside the service; one that is
+# already installed keeps what it has, because switching would start it on an empty database.
+detect_db_mode() {
+    local env_file="$INSTALL_DIR/.env" asked="${ASDL_DB:-}"
+    case "$asked" in
+        ""|embedded|external) ;;
+        *) die "ASDL_DB must be 'embedded' or 'external', not '$asked'." ;;
+    esac
+
+    if [[ -f "$env_file" ]]; then
+        if grep -q '^DB_EMBEDDED=true' "$env_file"; then
+            DB_MODE=embedded
+        else
+            DB_MODE=external
+            if [[ "$asked" == embedded ]]; then
+                die "This Hub already uses the system's PostgreSQL, so switching would start it on an empty database. Move it with scripts/migrate-to-embedded.sh instead."
+            fi
+        fi
+    else
+        DB_MODE="${asked:-embedded}"
+    fi
+    info "Database: $DB_MODE"
+}
+
 install_packages() {
     info "Installing system dependencies..."
     export DEBIAN_FRONTEND=noninteractive
+    local packages=(ca-certificates curl openssl nginx wireguard iproute2 iptables)
+    [[ "$DB_MODE" == external ]] && packages+=(postgresql postgresql-contrib)
     apt-get update -qq
-    apt-get install -y \
-        ca-certificates curl openssl \
-        postgresql postgresql-contrib \
-        nginx \
-        wireguard \
-        iproute2 \
-        iptables
+    apt-get install -y "${packages[@]}"
     ok "System dependencies ready."
 }
 
@@ -539,6 +564,16 @@ generate_secrets() {
 }
 
 setup_database() {
+    if [[ "$DB_MODE" == embedded ]]; then
+        # The Hub starts its own PostgreSQL (downloaded on first start); it only needs a private folder
+        info "Preparing the Hub's own database folder..."
+        mkdir -p "$INSTALL_DIR/data/postgres"
+        chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR/data"
+        chmod 700 "$INSTALL_DIR/data/postgres"
+        ok "Database folder ready (PostgreSQL is downloaded and started by the Hub on first start)."
+        return
+    fi
+
     info "Configuring PostgreSQL..."
     systemctl enable --now postgresql
 
@@ -665,13 +700,23 @@ write_env() {
     local production_mode
     production_mode="$(awk -F= '$1=="PRODUCTION_MODE"{print $2;exit}' "$INSTALL_DIR/.env" 2>/dev/null || true)"
     [[ "$production_mode" == "false" ]] || production_mode=true
-    cat > "$INSTALL_DIR/.env" <<EOF
-DB_HOST=127.0.0.1
+    local db_settings
+    if [[ "$DB_MODE" == embedded ]]; then
+        db_settings="DB_EMBEDDED=true
+DB_PORT=54329
+DB_USER=asdl
+DB_PASSWORD=$DB_PASSWORD
+DB_NAME=asdl_hub"
+    else
+        db_settings="DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_USER=asdl
 DB_PASSWORD=$DB_PASSWORD
 DB_NAME=asdl_hub
-DB_SSLMODE=disable
+DB_SSLMODE=disable"
+    fi
+    cat > "$INSTALL_DIR/.env" <<EOF
+$db_settings
 
 JWT_SECRET=$JWT_SECRET
 SECRETS_KEY=$SECRETS_KEY
@@ -775,11 +820,19 @@ setup_service() {
     # No CapabilityBoundingSet: it also caps what the hub runs via sudo
     # (nginx -t, reloading nginx, issuing certificates), so sudo could not
     # become root at all. Sudo access is limited by /etc/sudoers.d instead.
+    local after="network-online.target" wants="network-online.target" stop_timeout=""
+    if [[ "$DB_MODE" == external ]]; then
+        after+=" postgresql.service"
+        wants+=" postgresql.service"
+    else
+        # The Hub stops its own database cleanly on SIGTERM; give it time to
+        stop_timeout="TimeoutStopSec=60"
+    fi
     cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=ASDL Hub
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+After=$after
+Wants=$wants
 
 [Service]
 Type=simple
@@ -790,6 +843,7 @@ EnvironmentFile=$INSTALL_DIR/.env
 ExecStart=$INSTALL_DIR/bin/asdl-hub serve
 Restart=always
 RestartSec=5
+$stop_timeout
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=false
@@ -875,6 +929,7 @@ main() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     sleep 1
     prepare_source
+    detect_db_mode
     install_packages
     detect_existing
     ensure_user
