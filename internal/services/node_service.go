@@ -231,6 +231,9 @@ func (s *NodeService) GetNodeDetails(c *gin.Context) {
 
 	healthScore := s.calculateHealthScore(&node)
 
+	now := time.Now()
+	since := outageTrackingSince(s.db, now)
+
 	c.JSON(http.StatusOK, gin.H{
 		"node":            node,
 		"projects":        projects,
@@ -238,6 +241,9 @@ func (s *NodeService) GetNodeDetails(c *gin.Context) {
 		"project_count":   len(projects),
 		"container_count": len(containers),
 		"health_score":    healthScore,
+		"uptime":          s.uptimeFor(&node, now, since),
+		"outages":         s.recentOutages(node.ID, 20),
+		"tracked_since":   since,
 	})
 }
 

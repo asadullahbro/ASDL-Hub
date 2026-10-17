@@ -49,6 +49,7 @@ func closeOutage(db *gorm.DB, nodeID string, now time.Time) {
 // openOutagesForOfflineNodes covers nodes that were already offline when this feature (or the Hub) started:
 // without it their outage would never be recorded, because the sweeper only sees nodes going offline.
 func openOutagesForOfflineNodes(db *gorm.DB) {
+	outageTrackingSince(db, time.Now()) // starts the uptime clock the first time this runs
 	var nodes []models.Node
 	if err := db.Where("online = ?", false).Find(&nodes).Error; err != nil {
 		return
