@@ -46,6 +46,26 @@ func closeOutage(db *gorm.DB, nodeID string, now time.Time) {
 	}
 }
 
+// closeOutagesOfOnlineNodes is the safety net for every way a node can come back (a heartbeat, a registration,
+// anything added later): an outage still open for a node that is online has ended, at the node's last heartbeat.
+func closeOutagesOfOnlineNodes(db *gorm.DB) {
+	var open []models.NodeOutage
+	if err := db.Where("ended_at IS NULL").Find(&open).Error; err != nil || len(open) == 0 {
+		return
+	}
+	for _, o := range open {
+		var node models.Node
+		if err := db.First(&node, "id = ?", o.NodeID).Error; err != nil || !node.Online {
+			continue
+		}
+		end := node.LastHeartbeat
+		if end.Before(o.StartedAt) {
+			end = o.StartedAt
+		}
+		closeOutage(db, o.NodeID, end)
+	}
+}
+
 // openOutagesForOfflineNodes covers nodes that were already offline when this feature (or the Hub) started:
 // without it their outage would never be recorded, because the sweeper only sees nodes going offline.
 func openOutagesForOfflineNodes(db *gorm.DB) {

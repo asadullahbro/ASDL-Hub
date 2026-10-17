@@ -90,6 +90,7 @@ func (s *NodeService) Register(c *gin.Context) {
 		node.Capabilities = req.Capabilities
 		if !node.Online {
 			notifyNodeOnline(&node)
+			closeOutage(s.db, node.ID, time.Now())
 		}
 		node.Online = true
 		node.LastHeartbeat = time.Now()
@@ -491,6 +492,7 @@ func (s *NodeService) StartOfflineSweeper() {
 // sweepOffline marks online nodes that have missed their heartbeats as
 // offline. It does nothing until offlineGrace has passed since started.
 func (s *NodeService) sweepOffline(now, started time.Time) {
+	closeOutagesOfOnlineNodes(s.db)
 	if now.Sub(started) < offlineGrace {
 		return
 	}
