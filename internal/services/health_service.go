@@ -51,6 +51,9 @@ type HealthService struct {
 	// failingSince holds when each project's current run of failed checks
 	// began. Only the checker goroutine touches it.
 	failingSince map[string]time.Time
+	// unconfirmed counts, per project, how many times in a row it stopped answering without its node's agent
+	// reporting the container as down. Only the checker goroutine touches it.
+	unconfirmed map[string]int
 	// restarts holds when each project was last restarted in place, to cap the attempts. Only the checker goroutine touches it.
 	restarts map[string][]time.Time
 	// recovering counts consecutive good checks per failed project. Only the checker goroutine touches it.
@@ -66,6 +69,7 @@ func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxServ
 		failures:         make(map[string]int),
 		recovering:       make(map[string]int),
 		restarts:         make(map[string][]time.Time),
+		unconfirmed:      make(map[string]int),
 		down:             make(map[string]time.Time),
 		failingSince:     make(map[string]time.Time),
 	}
@@ -112,6 +116,32 @@ func (s *HealthService) deployInProgress(project *models.Project) bool {
 	return dep.Status == models.DeploymentStatusPending || dep.Status == models.DeploymentStatusRunning
 }
 
+// agentReportFresh is how recent the node's last heartbeat must be to trust the container list it carried.
+// Agents beat every 30s.
+const agentReportFresh = 60 * time.Second
+
+// maxUnconfirmedWaits is how many rounds (about 30s each) an app that isn't answering may wait for its agent to
+// confirm the container is down. The agent's report can be up to 30s behind, so right after a real crash it
+// still shows the container running; after this many rounds the Hub stops waiting and treats the app as failed.
+const maxUnconfirmedWaits = 3
+
+// containerConfirmedDown reports whether the node's own agent says the project's container is not running:
+// a fresh report that lacks it or shows it in another state. A failed health check alone is not enough,
+// because the Hub's check can fail while the app is fine (a network blip between the Hub and the node,
+// which can last a minute before the node counts as offline), and redeploying a healthy app is a real outage.
+// An agent that reports no containers (an old one) gives no answer, so this is false.
+func containerConfirmedDown(node *models.Node, project *models.Project, now time.Time) bool {
+	if now.Sub(node.LastHeartbeat) > agentReportFresh || len(node.Containers) == 0 {
+		return false
+	}
+	for _, c := range node.Containers {
+		if (c.ProjectID != "" && c.ProjectID == project.ID) || c.Name == project.Name {
+			return c.State != "running"
+		}
+	}
+	return true // the node is reporting and the container is not among what runs
+}
+
 // restartInPlace redeploys the project's image on the node it already runs on, for an app that stopped
 // answering while its node is still online (a crashed container, not a lost node). It reports whether it
 // took over: true means a restart was queued or is already underway, false means the caller should give up.
@@ -124,6 +154,18 @@ func (s *HealthService) restartInPlace(project *models.Project, image string) bo
 		log.Printf("⏳ %s already has a deploy underway, waiting for it", project.Name)
 		return true
 	}
+	if !containerConfirmedDown(&node, project, time.Now()) {
+		s.unconfirmed[project.ID]++
+		if s.unconfirmed[project.ID] <= maxUnconfirmedWaits {
+			log.Printf("⏳ %s is not answering, but its node's agent does not report the container as down yet (%d/%d): waiting before redeploying a possibly healthy app",
+				project.Name, s.unconfirmed[project.ID], maxUnconfirmedWaits)
+			return true
+		}
+		delete(s.unconfirmed, project.ID)
+		log.Printf("❌ %s still does not answer and its agent still reports it running: not redeploying (a network problem, or an app that hangs)", project.Name)
+		return false
+	}
+	delete(s.unconfirmed, project.ID)
 	ok, recent := restartAllowed(s.restarts[project.ID], time.Now())
 	s.restarts[project.ID] = recent
 	if !ok {
@@ -206,6 +248,7 @@ func (s *HealthService) checkAllProjects() {
 		if healthy[i] {
 			delete(s.failures, project.ID)
 			delete(s.failingSince, project.ID)
+			delete(s.unconfirmed, project.ID)
 			if project.HealthStatus != "healthy" {
 				s.db.Model(&project).Update("health_status", "healthy")
 			}
