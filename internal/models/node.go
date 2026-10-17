@@ -44,6 +44,19 @@ type Node struct {
 	Containers []NodeContainer `gorm:"serializer:json" json:"containers"`
 }
 
+// NodeOutage is one stretch during which a node sent no heartbeats: how long it was gone, kept for good
+// (a few rows a week), unlike heartbeats, of which only the latest per node is kept.
+type NodeOutage struct {
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	NodeID string `gorm:"index;not null;size:36" json:"node_id"`
+	// StartedAt is the node's last heartbeat before it went quiet.
+	StartedAt time.Time `json:"started_at"`
+	// EndedAt is when its first heartbeat came back; nil while it is still offline.
+	EndedAt *time.Time `json:"ended_at"`
+	// Seconds is the length of the outage, filled in when it ends.
+	Seconds int64 `json:"seconds"`
+}
+
 // NodeContainer is one container as the node's agent reports it.
 type NodeContainer struct {
 	Name      string `json:"name"`

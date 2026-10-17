@@ -152,6 +152,7 @@ For the command line, run: asdl-hub help
 	// Node service — manages node registration, heartbeats, and offline detection
 	nodeService := services.NewNodeService(database)
 	nodeService.StartOfflineSweeper()
+	nodeService.StartHeartbeatTrimmer()
 	nodeOps := services.NewNodeOpsService(database, deployer)
 
 	// Nginx service — generates and reloads nginx config from running projects

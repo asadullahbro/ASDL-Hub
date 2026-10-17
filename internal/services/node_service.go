@@ -151,6 +151,7 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 
 	if !node.Online {
 		notifyNodeOnline(&node)
+		closeOutage(s.db, node.ID, time.Now())
 	}
 	node.Online = true
 	node.LastHeartbeat = time.Now()
@@ -189,7 +190,7 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 		Uptime:      req.Uptime,
 		Timestamp:   time.Now(),
 	}
-	s.db.Create(&heartbeat)
+	recordHeartbeat(s.db, &heartbeat)
 
 	// The agent shows maintenance mode on its own dashboard.
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "maintenance": node.Maintenance})
@@ -472,6 +473,7 @@ const heartbeatTimeout = 90 * time.Second
 
 func (s *NodeService) StartOfflineSweeper() {
 	started := time.Now()
+	openOutagesForOfflineNodes(s.db)
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		for now := range ticker.C {
@@ -493,6 +495,7 @@ func (s *NodeService) sweepOffline(now, started time.Time) {
 		if now.Sub(node.LastHeartbeat) > heartbeatTimeout {
 			node.Online = false
 			s.db.Save(&node)
+			openOutage(s.db, &node)
 			log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)
 			notify(Event{
 				Type: EventNodeOffline, Level: LevelError,
@@ -538,6 +541,7 @@ func (s *NodeService) Remove(c *gin.Context, removePeers func(publicKey, vpnIP s
 	s.db.Delete(&models.EnrollmentToken{}, "used_by = ?", node.ID)
 	s.db.Unscoped().Delete(&models.Container{}, "node_id = ?", node.ID)
 	s.db.Delete(&models.Heartbeat{}, "node_id = ?", node.ID)
+	s.db.Delete(&models.NodeOutage{}, "node_id = ?", node.ID)
 	s.db.Unscoped().Delete(&models.Job{}, "node_id = ?", node.ID)
 	s.db.Delete(&models.Setting{}, "key = ? AND value = ?", "master_node_id", node.ID)
 	// Unscoped: a soft-deleted row would keep holding its VPN IP under the

@@ -50,6 +50,7 @@ func Init(dsn string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&models.Node{},
 		&models.Heartbeat{},
+		&models.NodeOutage{},
 		&models.Job{},
 		&models.User{},
 		&models.Session{},

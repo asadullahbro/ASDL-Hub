@@ -12,7 +12,7 @@ import (
 )
 
 func newNodeTestService(t *testing.T) (*NodeService, *gorm.DB) {
-	db := testutil.NewDB(t, &models.Node{})
+	db := testutil.NewDB(t, &models.Node{}, &models.Heartbeat{}, &models.NodeOutage{})
 	return NewNodeService(db), db
 }
 
