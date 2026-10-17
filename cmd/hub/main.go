@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +21,7 @@ import (
 	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/cli"
 	"github.com/asdl/hub/internal/db"
+	"github.com/asdl/hub/internal/embeddedpg"
 	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
 )
@@ -76,6 +80,35 @@ For the command line, run: asdl-hub help
 	}
 
 	cfg := loadConfig()
+
+	// DB_EMBEDDED=true: the Hub runs its own PostgreSQL as a child process, so one service covers both
+	var pgServer *embeddedpg.Server
+	if embeddedpg.Enabled() {
+		workDir, _ := os.Getwd()
+		pgCfg := embeddedpg.ConfigFromEnv(workDir)
+		var err error
+		if pgServer, err = embeddedpg.Start(pgCfg); err != nil {
+			log.Fatalf("Failed to start the embedded database: %v", err)
+		}
+		cfg.Database.Host = "127.0.0.1"
+		cfg.Database.Port = int(pgCfg.Port)
+		cfg.Database.User = pgCfg.User
+		cfg.Database.Password = pgCfg.Password
+		cfg.Database.Name = pgCfg.Database
+		cfg.Database.SSLMode = "disable"
+
+		// "serve --db-only" runs just the database (to restore a backup into it before the Hub starts)
+		if len(os.Args) > 2 && os.Args[2] == "--db-only" {
+			log.Println("Embedded database is up (database only). Stop it with Ctrl-C or SIGTERM.")
+			stop := make(chan os.Signal, 1)
+			signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+			<-stop
+			if err := pgServer.Stop(); err != nil {
+				log.Printf("Stopping the embedded database: %v", err)
+			}
+			return
+		}
+	}
 
 	if cfg.Database.Password == "dbpass123" {
 		log.Println("⚠️  DB_PASSWORD is not set — using the insecure default. Set DB_PASSWORD before deploying anywhere but local dev.")
@@ -710,9 +743,26 @@ echo "Agent updated successfully"
 		IdleTimeout:  60 * time.Second,
 	}
 
-	if err := srv.ListenAndServe(); err != nil {
+	// On SIGTERM (systemctl stop/restart) stop serving, then shut the embedded database down cleanly
+	done := make(chan struct{})
+	go func() {
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+		<-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		if err := pgServer.Stop(); err != nil {
+			log.Printf("Stopping the embedded database: %v", err)
+		}
+		close(done)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		pgServer.Stop()
 		log.Fatalf("Failed to start server: %v", err)
 	}
+	<-done
 }
 
 func loadConfig() *Config {
