@@ -4,7 +4,8 @@ import { usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { UpdateBanner } from './UpdateBanner';
 
-const PUBLIC_ROUTES = ['/login'];
+// Pages shown on their own, without the sidebar: the sign-in page and the status page.
+const PUBLIC_ROUTES = ['/login', '/status'];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

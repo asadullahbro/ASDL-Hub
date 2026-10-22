@@ -484,3 +484,28 @@ export interface NotificationChannelInput {
   projects?: string[];
   enabled?: boolean;
 }
+
+// The status page (GET /status/apps): what visitors see, never where an app runs.
+export type AppState = 'operational' | 'degraded' | 'down';
+
+export interface StatusApp {
+  name: string;
+  status: AppState;
+  uptime_7d: number | null;
+  uptime_30d: number | null;
+}
+
+export interface StatusIncident {
+  app: string;
+  started_at: string;
+  ended_at: string | null; // null while it is still down
+  seconds: number;
+}
+
+export interface StatusReport {
+  updated_at: string;
+  overall: AppState;
+  apps: StatusApp[];
+  incidents: StatusIncident[];
+  tracked_since: string; // availability is counted from here
+}

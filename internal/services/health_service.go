@@ -58,6 +58,8 @@ type HealthService struct {
 	restarts map[string][]time.Time
 	// recovering counts consecutive good checks per failed project. Only the checker goroutine touches it.
 	recovering map[string]int
+	// outagesLoaded makes the checker pick up, once, the app outages that were open when the Hub started.
+	outagesLoaded sync.Once
 }
 
 func NewHealthService(db *gorm.DB, migrationService *MigrationService, nginxService *NginxService, deployer *Deployer) *HealthService {
@@ -217,6 +219,7 @@ func (s *HealthService) recoverFailed() {
 		}
 		node := s.nodeName(project.NodeID)
 		delete(s.down, project.ID)
+		closeAppOutage(s.db, project.ID, time.Now())
 		notify(Event{
 			Type: EventAppRecovered, Level: LevelSuccess,
 			Title:   project.Name + " is back up",
@@ -227,6 +230,13 @@ func (s *HealthService) recoverFailed() {
 }
 
 func (s *HealthService) checkAllProjects() {
+	s.outagesLoaded.Do(func() {
+		for id, since := range openAppOutages(s.db) {
+			if _, ok := s.down[id]; !ok {
+				s.down[id] = since
+			}
+		}
+	})
 	s.recoverFailed()
 	var projects []models.Project
 	s.db.Where("status = ?", "running").Find(&projects)
@@ -254,6 +264,7 @@ func (s *HealthService) checkAllProjects() {
 			}
 			if since, ok := s.down[project.ID]; ok {
 				delete(s.down, project.ID)
+				closeAppOutage(s.db, project.ID, time.Now())
 				node := s.nodeName(project.NodeID)
 				notify(Event{
 					Type: EventAppRecovered, Level: LevelSuccess,
@@ -439,6 +450,7 @@ func (s *HealthService) announceDown(project *models.Project, next string) {
 		since = time.Now()
 	}
 	s.down[project.ID] = since
+	openAppOutage(s.db, project.ID, since)
 	node := s.nodeName(project.NodeID)
 	notify(Event{
 		Type: EventAppDown, Level: LevelError,

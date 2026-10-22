@@ -204,6 +204,7 @@ For the command line, run: asdl-hub help
 	settingsService := services.NewSettingsService(database, authService, jwtSecret)
 	settingsService.HashStoredTokens()
 	settingsHandlers := handlers.NewSettingsHandlers(settingsService)
+	statusService := services.NewStatusService(database)
 	authHandlers.CLI = services.NewCLIAuth(authService, settingsService)
 
 	// enrollment and wireguard services
@@ -351,6 +352,7 @@ For the command line, run: asdl-hub help
 			mesh.POST("/jobs/:id/complete", jobService.Complete)
 		}
 
+		public.GET("/status/apps", statusService.Public)
 		public.GET("/status", func(c *gin.Context) {
 			var nodes []models.Node
 			database.Order("online DESC, vpn_ip ASC").Find(&nodes)
@@ -492,6 +494,7 @@ For the command line, run: asdl-hub help
 			viewer.GET("/projects/:id/health", healthService.GetProjectHealth)
 			viewer.GET("/projects/:id/placement", healthService.GetPlacement)
 			viewer.GET("/projects/:id/rollback", projectService.RollbackInfo)
+			viewer.GET("/status/apps/internal", statusService.Internal)
 
 			viewer.GET("/migrations", migrationService.ListMigrations)
 			viewer.GET("/migrations/:id", migrationService.GetMigration)
@@ -700,6 +703,8 @@ echo "Agent updated successfully"
 			settings.GET("/tokens", settingsHandlers.ListTokens)
 			settings.POST("/tokens", settingsHandlers.GenerateToken)
 			settings.DELETE("/tokens/:id", settingsHandlers.RevokeToken)
+			settings.GET("/status-page", statusService.GetSetting)
+			settings.PUT("/status-page", statusService.PutSetting)
 			settings.GET("/master-node", settingsHandlers.GetMasterNode)
 			settings.POST("/master-node", settingsHandlers.SetMasterNode)
 			settings.DELETE("/master-node", settingsHandlers.ClearMasterNode)

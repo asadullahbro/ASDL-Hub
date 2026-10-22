@@ -21,6 +21,10 @@ const AuthContext = createContext<AuthContextType>({
 
 const PUBLIC_ROUTES = ['/login'];
 
+// Pages anyone may open, signed in or not, and that nobody is sent away from (unlike /login).
+const OPEN_ROUTES = ['/status'];
+const isOpenRoute = (pathname: string) => OPEN_ROUTES.includes(pathname.replace(/\/$/, ''));
+
 // Where to go after signing in: the page that sent us to /login (kept in
 // ?next=), if it is a page of this app, else the home page.
 function nextAfterLogin(): string {
@@ -50,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!token) {
       setLoading(false);
-      if (!PUBLIC_ROUTES.includes(pathname)) router.push(loginUrl(pathname));
+      if (!PUBLIC_ROUTES.includes(pathname) && !isOpenRoute(pathname)) router.push(loginUrl(pathname));
       return;
     }
 
@@ -66,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setLoading(false);
         // An expired token: sign in again, then carry on to the page asked for.
-        if (!PUBLIC_ROUTES.includes(pathname)) router.push(loginUrl(pathname));
+        if (!PUBLIC_ROUTES.includes(pathname) && !isOpenRoute(pathname)) router.push(loginUrl(pathname));
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -81,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 // Replace the second useEffect with this:
 useEffect(() => {
   if (loading) return;
-  if (!user && !PUBLIC_ROUTES.includes(pathname)) {
+  if (!user && !PUBLIC_ROUTES.includes(pathname) && !isOpenRoute(pathname)) {
     router.replace(loginUrl(pathname)); // replace not push — no history entry
   }
   if (user && PUBLIC_ROUTES.includes(pathname)) {

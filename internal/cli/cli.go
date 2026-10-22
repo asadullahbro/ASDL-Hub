@@ -23,6 +23,7 @@ Overview
   doctor                      Check everything and say what to fix
   nodes                       Nodes with their state, agent and resources
   apps                        Apps (projects): where they run and their health
+  status-page [on|off]        Show, or switch, the public status page
   app <app>                   One app in detail, with its plugins
 
 Apps
@@ -160,6 +161,12 @@ func (e *env) run(cmd string, args []string) error {
 		return e.status(c)
 	case "nodes":
 		return e.nodes(c)
+	case "status-page":
+		setting := ""
+		if len(args) > 0 {
+			setting = args[0]
+		}
+		return e.statusPage(c, setting)
 	case "apps", "projects":
 		return e.apps(c)
 	case "app", "project":

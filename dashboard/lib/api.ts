@@ -11,6 +11,7 @@ import {
   NodeDetail,
   NodesUptime,
   NodeSamples,
+  StatusReport,
   Migration,
   ProjectHealth,
   PaginatedResponse,
@@ -287,6 +288,13 @@ export const api = {
   // Load readings for a node's graphs, oldest first (Hubs from the release that added them)
   getNodeSamples: (id: string, hours: number): Promise<NodeSamples> =>
     request<NodeSamples>(`/nodes/${id}/samples?hours=${hours}`),
+
+  // The status page: the public one (404 until an admin makes it public), and the logged-in one with every app
+  getPublicStatus: (): Promise<StatusReport> =>
+    request<StatusReport>('/status/apps'),
+
+  getInternalStatus: (): Promise<StatusReport> =>
+    request<StatusReport>('/status/apps/internal'),
 
   getProjectsByNode: (nodeId: string): Promise<Project[]> =>
     request<Project[]>(`/nodes/${nodeId}/projects`),
