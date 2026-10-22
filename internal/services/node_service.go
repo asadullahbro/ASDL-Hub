@@ -90,7 +90,7 @@ func (s *NodeService) Register(c *gin.Context) {
 		node.Capabilities = req.Capabilities
 		if !node.Online {
 			notifyNodeOnline(&node)
-			closeOutage(s.db, node.ID, time.Now())
+			closeOutage(s.db, node.ID, time.Now(), -1)
 		}
 		node.Online = true
 		node.LastHeartbeat = time.Now()
@@ -152,7 +152,7 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 
 	if !node.Online {
 		notifyNodeOnline(&node)
-		closeOutage(s.db, node.ID, time.Now())
+		closeOutage(s.db, node.ID, time.Now(), req.Uptime)
 	}
 	node.Online = true
 	node.LastHeartbeat = time.Now()

@@ -184,6 +184,10 @@ export interface NodeOutage {
   started_at: string;
   ended_at: string | null; // null while the node is still offline
   seconds: number;
+  // Guessed when the node returned; empty for outages from before causes were recorded.
+  cause?: 'reboot' | 'weak_link' | 'connection' | '';
+  wifi_at_start?: number; // last WiFi signal (0-100) before it went quiet; 0 when wired or unknown
+  ping_at_start?: number; // last ping in ms before it went quiet
 }
 
 export interface NodeUptime {

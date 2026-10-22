@@ -86,12 +86,12 @@ func TestOutage_OpenedByTheSweeperAndClosedOnReturn(t *testing.T) {
 	}
 
 	back := now.Add(2 * time.Minute)
-	closeOutage(db, "n1", back)
+	closeOutage(db, "n1", back, -1)
 	db.Find(&outages)
 	if outages[0].EndedAt == nil || outages[0].Seconds != int64(back.Sub(last).Seconds()) {
 		t.Fatalf("the outage should end at the return and record its length: %+v", outages[0])
 	}
-	closeOutage(db, "n1", back.Add(time.Hour)) // closing again changes nothing
+	closeOutage(db, "n1", back.Add(time.Hour), -1) // closing again changes nothing
 	db.Find(&outages)
 	if outages[0].Seconds != int64(back.Sub(last).Seconds()) {
 		t.Fatal("an already closed outage was changed")
@@ -130,6 +130,53 @@ func TestOutageAndHeartbeatWrites_NeverBreakTheCaller(t *testing.T) {
 		t.Fatal("the sweeper stopped working when the outage table was unavailable")
 	}
 	recordHeartbeat(db, &models.Heartbeat{NodeID: "n1"}) // must not panic
-	closeOutage(db, "n1", now)                           // must not panic
+	closeOutage(db, "n1", now, -1)                       // must not panic
 	trimHeartbeats(db)                                   // must not panic
+}
+
+func TestOutageCause(t *testing.T) {
+	steady := models.NodeOutage{WiFiAtStart: 80, PingAtStart: 20}
+	weakWiFiOutage := models.NodeOutage{WiFiAtStart: 30, PingAtStart: 20}
+	slowOutage := models.NodeOutage{WiFiAtStart: 0, PingAtStart: 250}
+	cases := []struct {
+		name    string
+		o       models.NodeOutage
+		seconds int64
+		uptime  int64
+		want    string
+	}{
+		{"machine uptime shorter than the outage means it restarted", steady, 3600, 120, models.OutageCauseReboot},
+		{"restart is caught even when WiFi was weak", weakWiFiOutage, 3600, 120, models.OutageCauseReboot},
+		{"stayed up, weak WiFi before it dropped", weakWiFiOutage, 150, 90000, models.OutageCauseWeakLink},
+		{"stayed up, slow ping before it dropped", slowOutage, 150, 90000, models.OutageCauseWeakLink},
+		{"stayed up and looked fine", steady, 150, 90000, models.OutageCauseConnection},
+		{"wired node has no WiFi reading (0), which is not weak", models.NodeOutage{PingAtStart: 5}, 150, 90000, models.OutageCauseConnection},
+		{"uptime just over the outage is not a restart", steady, 150, 160, models.OutageCauseConnection},
+		{"unknown uptime leaves the cause empty", steady, 150, -1, ""},
+	}
+	for _, tc := range cases {
+		if got := outageCause(tc.o, tc.seconds, tc.uptime); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestOpenAndCloseOutage_RecordsLinkAndCause(t *testing.T) {
+	_, db := newNodeTestService(t)
+	gone := time.Now().Add(-10 * time.Minute)
+	node := &models.Node{ID: "n1", Hostname: "laptop", Online: false, LastHeartbeat: gone, WiFiSignal: 35, PingLatency: 12}
+
+	openOutage(db, node)
+	closeOutage(db, "n1", gone.Add(3*time.Minute), 86400)
+
+	var o models.NodeOutage
+	if err := db.First(&o, "node_id = ?", "n1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if o.WiFiAtStart != 35 || o.PingAtStart != 12 {
+		t.Fatalf("did not keep the link readings from before the outage: %+v", o)
+	}
+	if o.Cause != models.OutageCauseWeakLink || o.Seconds != 180 {
+		t.Fatalf("want a 180s weak_link outage, got %+v", o)
+	}
 }

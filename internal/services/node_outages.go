@@ -23,13 +23,37 @@ func openOutage(db *gorm.DB, node *models.Node) {
 	if open > 0 {
 		return
 	}
-	if err := db.Create(&models.NodeOutage{NodeID: node.ID, StartedAt: node.LastHeartbeat}).Error; err != nil {
+	o := models.NodeOutage{NodeID: node.ID, StartedAt: node.LastHeartbeat, WiFiAtStart: node.WiFiSignal, PingAtStart: node.PingLatency}
+	if err := db.Create(&o).Error; err != nil {
 		log.Printf("⚠️ Could not record the outage of %s: %v", node.Hostname, err)
 	}
 }
 
-// closeOutage records that a node is sending heartbeats again, ending any outage still open for it.
-func closeOutage(db *gorm.DB, nodeID string, now time.Time) {
+// Thresholds shared with the node health score: under 50 is a weak WiFi signal, over 100 ms a slow link.
+const (
+	weakWiFi        = 50
+	slowPingMs      = 100
+	rebootGraceSecs = 30
+)
+
+// outageCause guesses why a node went quiet. uptime is the machine's uptime (seconds) in the first heartbeat
+// after the outage, or negative when unknown: a machine whose uptime is shorter than the outage was restarted.
+func outageCause(o models.NodeOutage, seconds, uptime int64) string {
+	if uptime < 0 {
+		return ""
+	}
+	if uptime+rebootGraceSecs < seconds {
+		return models.OutageCauseReboot
+	}
+	if (o.WiFiAtStart > 0 && o.WiFiAtStart < weakWiFi) || o.PingAtStart > slowPingMs {
+		return models.OutageCauseWeakLink
+	}
+	return models.OutageCauseConnection
+}
+
+// closeOutage records that a node is sending heartbeats again, ending any outage still open for it. uptime is
+// the node's machine uptime in seconds from that heartbeat (negative when not known, which leaves the cause empty).
+func closeOutage(db *gorm.DB, nodeID string, now time.Time, uptime int64) {
 	var open []models.NodeOutage
 	if err := db.Where("node_id = ? AND ended_at IS NULL", nodeID).Find(&open).Error; err != nil {
 		log.Printf("⚠️ Could not look up the open outage of %s: %v", nodeID, err)
@@ -40,7 +64,7 @@ func closeOutage(db *gorm.DB, nodeID string, now time.Time) {
 		if secs < 0 {
 			secs = 0
 		}
-		if err := db.Model(&models.NodeOutage{}).Where("id = ?", o.ID).Updates(map[string]interface{}{"ended_at": now, "seconds": secs}).Error; err != nil {
+		if err := db.Model(&models.NodeOutage{}).Where("id = ?", o.ID).Updates(map[string]interface{}{"ended_at": now, "seconds": secs, "cause": outageCause(o, secs, uptime)}).Error; err != nil {
 			log.Printf("⚠️ Could not close the outage of %s: %v", nodeID, err)
 		}
 	}
@@ -62,7 +86,7 @@ func closeOutagesOfOnlineNodes(db *gorm.DB) {
 		if end.Before(o.StartedAt) {
 			end = o.StartedAt
 		}
-		closeOutage(db, o.NodeID, end)
+		closeOutage(db, o.NodeID, end, -1)
 	}
 }
 

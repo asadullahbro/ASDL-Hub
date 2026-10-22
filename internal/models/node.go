@@ -44,6 +44,13 @@ type Node struct {
 	Containers []NodeContainer `gorm:"serializer:json" json:"containers"`
 }
 
+// Why a node went quiet, as guessed when it came back (NodeOutage.Cause).
+const (
+	OutageCauseReboot     = "reboot"
+	OutageCauseWeakLink   = "weak_link"
+	OutageCauseConnection = "connection"
+)
+
 // NodeOutage is one stretch during which a node sent no heartbeats: how long it was gone, kept for good
 // (a few rows a week), unlike heartbeats, of which only the latest per node is kept.
 type NodeOutage struct {
@@ -55,6 +62,13 @@ type NodeOutage struct {
 	EndedAt *time.Time `json:"ended_at"`
 	// Seconds is the length of the outage, filled in when it ends.
 	Seconds int64 `json:"seconds"`
+	// Cause is a best guess made when the node returns: "reboot" (the machine restarted: power or a crash),
+	// "weak_link" (it stayed up, and its WiFi or ping was poor just before it went quiet) or "connection"
+	// (it stayed up and looked fine, so the network or the agent dropped). Empty when it could not be told.
+	Cause string `gorm:"size:20" json:"cause"`
+	// WiFiAtStart and PingAtStart are the node's last reported WiFi signal (0-100) and ping (ms) before it went quiet.
+	WiFiAtStart int     `json:"wifi_at_start"`
+	PingAtStart float64 `json:"ping_at_start"`
 }
 
 // NodeContainer is one container as the node's agent reports it.

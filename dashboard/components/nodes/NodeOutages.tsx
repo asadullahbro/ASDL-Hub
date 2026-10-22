@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { NodeDetail } from '@/types';
+import type { NodeDetail, NodeOutage } from '@/types';
 import { Card, EmptyState } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 
@@ -21,6 +21,33 @@ export function uptimeColor(pct: number | null | undefined): string {
   if (pct >= 99.5) return 'text-status-green';
   if (pct >= 95) return 'text-status-yellow';
   return 'text-status-red';
+}
+
+const CAUSES: Record<string, { label: string; hint: string }> = {
+  reboot: { label: 'restarted', hint: 'The machine restarted: a power cut or a crash.' },
+  weak_link: { label: 'weak link', hint: 'The machine stayed up, but its WiFi or ping was poor just before it went quiet.' },
+  connection: { label: 'connection', hint: 'The machine stayed up and looked fine, so the network or the agent dropped.' },
+};
+
+// When outages tend to start, if they cluster: the busiest three hours of the day (local time) holding at least
+// half of at least four outages. Null when there is no pattern to report.
+export function outagePattern(outages: NodeOutage[]): string | null {
+  if (outages.length < 4) return null;
+  const perHour = new Array(24).fill(0);
+  for (const o of outages) perHour[new Date(o.started_at).getHours()]++;
+  let best = 0;
+  let bestStart = 0;
+  for (let h = 0; h < 24; h++) {
+    if (perHour[h] === 0) continue; // start on an hour that has an outage, so the window is as tight as it can be
+    const n = perHour[h] + perHour[(h + 1) % 24] + perHour[(h + 2) % 24];
+    if (n > best) {
+      best = n;
+      bestStart = h;
+    }
+  }
+  if (best * 2 < outages.length) return null;
+  const hh = (h: number) => `${String(h % 24).padStart(2, '0')}:00`;
+  return `${best} of ${outages.length} outages began between ${hh(bestStart)} and ${hh(bestStart + 3)}`;
 }
 
 function when(iso: string): string {
@@ -41,6 +68,7 @@ export function NodeOutages({ nodeId }: { nodeId: string }) {
   if (!d?.uptime) return null;
   const { uptime } = d;
   const outages = d.outages ?? [];
+  const pattern = outagePattern(outages);
 
   return (
     <Card icon={Clock} title="Availability">
@@ -63,6 +91,8 @@ export function NodeOutages({ nodeId }: { nodeId: string }) {
         </div>
       </dl>
 
+      {pattern && <p className="mt-4 text-sm text-text-secondary">{pattern}.</p>}
+
       {outages.length === 0 ? (
         <div className="mt-4"><EmptyState>No outages recorded.</EmptyState></div>
       ) : (
@@ -71,6 +101,11 @@ export function NodeOutages({ nodeId }: { nodeId: string }) {
             <div key={o.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
               <div className="text-text-primary">
                 {when(o.started_at)} <span className="text-text-muted">to</span> {o.ended_at ? when(o.ended_at) : 'now'}
+                {o.cause && CAUSES[o.cause] && (
+                  <span className="ml-2 text-xs text-text-muted" title={CAUSES[o.cause].hint}>
+                    {CAUSES[o.cause].label}
+                  </span>
+                )}
               </div>
               {o.ended_at ? (
                 <span className="font-mono text-text-secondary">{formatDuration(o.seconds)}</span>

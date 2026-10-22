@@ -80,6 +80,7 @@ type nodeUptime struct {
 		StartedAt time.Time  `json:"started_at"`
 		EndedAt   *time.Time `json:"ended_at"`
 		Seconds   int64      `json:"seconds"`
+		Cause     string     `json:"cause"`
 	} `json:"last_outage"`
 }
 
@@ -303,7 +304,11 @@ func lastOutageCell(u nodeUptime) string {
 	if o.EndedAt == nil {
 		return "ongoing, " + duration(time.Since(o.StartedAt))
 	}
-	return duration(time.Duration(o.Seconds)*time.Second) + ", " + ago(*o.EndedAt)
+	cell := duration(time.Duration(o.Seconds)*time.Second) + ", " + ago(*o.EndedAt)
+	if l := causeLabel(o.Cause); l != "-" {
+		cell += " (" + l + ")"
+	}
+	return cell
 }
 
 // duration is a length of time in its two largest units: "2d 3h", "4h 5m", "2m 38s", "45s".

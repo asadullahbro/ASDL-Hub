@@ -37,6 +37,7 @@ Apps
   logs <app> [-n lines]       An app's recent logs
 
 Nodes
+  outages <node>              A node's outages, their likely cause, and when they happen
   maintenance <node> on|off   Move apps off a node before working on it, or end that
   node remove <node>          Forget a node for good (move its apps off first)
 
@@ -209,6 +210,11 @@ func (e *env) run(cmd string, args []string) error {
 			}
 		}
 		return e.removeNode(c, name, yes)
+	case "outages":
+		if len(args) < 1 {
+			return usageError{"expected asdl-hub outages <node>"}
+		}
+		return e.outages(c, args[0])
 	case "maintenance":
 		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
 			return usageError{"expected asdl-hub maintenance <node> on|off"}
