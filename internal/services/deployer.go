@@ -20,6 +20,8 @@ const (
 	TriggerCI        = "ci"
 	TriggerFailover  = "failover"
 	TriggerMigration = "migration"
+	// TriggerRollback puts the previous image back, by hand or after a deploy that never came up.
+	TriggerRollback = "rollback"
 	// TriggerManual covers deploys started from the dashboard or API:
 	// creating a project, changing its config, or pressing Redeploy.
 	TriggerManual = "manual"

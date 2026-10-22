@@ -396,14 +396,19 @@ func (s *ProjectService) redeploy(project *models.Project) (*models.Job, error) 
 	if project.Image == "" {
 		return nil, fmt.Errorf("project has no image yet; deploy it from CI first")
 	}
+	return s.deployImage(project, project.Image, TriggerManual)
+}
+
+// deployImage starts image on the project's node (or the best online one when that node is unavailable).
+func (s *ProjectService) deployImage(project *models.Project, image, trigger string) (*models.Job, error) {
 	var node models.Node
 	if err := s.db.Scopes(models.Available).First(&node, "id = ?", project.NodeID).Error; err != nil {
 		if err := s.db.Scopes(models.Available).Order("health_score desc").First(&node).Error; err != nil {
 			return nil, fmt.Errorf("no online node to run it on")
 		}
 	}
-	job, _, err := s.deployer.Dispatch(project, &node, project.Image, DeployMeta{
-		Trigger:    TriggerManual,
+	job, _, err := s.deployer.Dispatch(project, &node, image, DeployMeta{
+		Trigger:    trigger,
 		Repository: project.Repository,
 	})
 	return job, err

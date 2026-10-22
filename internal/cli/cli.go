@@ -34,6 +34,7 @@ Apps
   env unset <app> [KEY]       Remove variables
   move <app> [node]           Move an app to another node (without one, the
                               best node is suggested and you are asked)
+  rollback <app>              Put an app's previous version back
   restart <app>               Restart an app's container
   logs <app> [-n lines]       An app's recent logs
 
@@ -188,6 +189,11 @@ func (e *env) run(cmd string, args []string) error {
 			to = args[1]
 		}
 		return e.move(c, args[0], to)
+	case "rollback":
+		if err := needArgs(args, 1, "an app name"); err != nil {
+			return err
+		}
+		return e.rollback(c, args[0])
 	case "restart":
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err

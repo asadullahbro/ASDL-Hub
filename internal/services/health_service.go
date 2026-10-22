@@ -340,6 +340,14 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 		return
 	}
 
+	if s.rollbackUnderway(project) {
+		log.Printf("⏳ %s is being rolled back, waiting for it", project.Name)
+		return
+	}
+	if s.tryRollback(project) {
+		return
+	}
+
 	image := s.failoverImage(project)
 	if image == "" {
 		log.Printf("❌ %s has no image to fail over with", project.Name)

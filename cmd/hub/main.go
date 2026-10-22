@@ -490,6 +490,7 @@ For the command line, run: asdl-hub help
 			viewer.GET("/nodes/:id/projects", projectService.GetProjectsByNode)
 			viewer.GET("/projects/:id/health", healthService.GetProjectHealth)
 			viewer.GET("/projects/:id/placement", healthService.GetPlacement)
+			viewer.GET("/projects/:id/rollback", projectService.RollbackInfo)
 
 			viewer.GET("/migrations", migrationService.ListMigrations)
 			viewer.GET("/migrations/:id", migrationService.GetMigration)
@@ -640,6 +641,7 @@ echo "Agent updated successfully"
 			operator.PUT("/projects/:id", projectService.UpdateProject)
 			operator.DELETE("/projects/:id", projectService.DeleteProject)
 			operator.POST("/projects/:id/redeploy", projectService.Redeploy)
+			operator.POST("/projects/:id/rollback", projectService.Rollback)
 
 			operator.POST("/migrations", migrationService.MigrateProject)
 
