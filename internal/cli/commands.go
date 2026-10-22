@@ -468,7 +468,8 @@ func (e *env) restart(c *client, name string) error {
 	return e.follow(c, res.JobID, 2*time.Minute, false)
 }
 
-func (e *env) logs(c *client, name string, lines int) error {
+// logs prints an app's recent logs; with follow it keeps printing new lines as they come (for up to 10 minutes).
+func (e *env) logs(c *client, name string, lines int, follow bool) error {
 	p, err := c.findApp(name)
 	if err != nil {
 		return err
@@ -479,8 +480,15 @@ func (e *env) logs(c *client, name string, lines int) error {
 	var res struct {
 		JobID string `json:"job_id"`
 	}
-	if err := c.do("POST", fmt.Sprintf("/nodes/%s/containers/%s/logs?lines=%d", p.NodeID, url.PathEscape(p.Name), lines), nil, &res); err != nil {
+	path := fmt.Sprintf("/nodes/%s/containers/%s/logs?lines=%d", p.NodeID, url.PathEscape(p.Name), lines)
+	if follow {
+		path += "&follow=1"
+	}
+	if err := c.do("POST", path, nil, &res); err != nil {
 		return err
+	}
+	if follow {
+		return e.followJob(c, res.JobID)
 	}
 	return e.follow(c, res.JobID, time.Minute, true)
 }

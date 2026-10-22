@@ -190,6 +190,22 @@ export interface NodeOutage {
   ping_at_start?: number; // last ping in ms before it went quiet
 }
 
+// One reading of a node's load, taken about once a minute (kept for two weeks).
+export interface NodeSample {
+  at: string;
+  cpu_percent: number;
+  memory_percent: number;
+  disk_percent: number;
+  load_1: number;
+  ping_ms: number;
+  wifi_signal: number; // 0 when the node is wired or does not report it
+}
+
+export interface NodeSamples {
+  hours: number;
+  samples: NodeSample[];
+}
+
 export interface NodeUptime {
   node_id: string;
   uptime_7d: number | null; // null for a node that never reported

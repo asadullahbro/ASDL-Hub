@@ -2,6 +2,7 @@ package services
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +113,33 @@ func TestParseWGDump(t *testing.T) {
 	}
 	if _, ok := got["10.101.0.4"]; ok {
 		t.Error("a peer that never completed a handshake has no time")
+	}
+}
+
+func containerLogsJob(t *testing.T, query string) models.Job {
+	t.Helper()
+	_, _, db := newFailoverEnv(t)
+	ops := NewNodeOpsService(db, NewDeployer(db))
+	c, w := newTestContext(http.MethodPost, "/nodes/good/containers/api/logs"+query, "")
+	c.Params = gin.Params{{Key: "id", Value: "good"}, {Key: "name", Value: "api"}}
+	ops.ContainerLogs(c)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var job models.Job
+	if err := db.First(&job, "node_id = ?", "good").Error; err != nil {
+		t.Fatal(err)
+	}
+	return job
+}
+
+func TestContainerLogs_FollowKeepsTheJobRunningLongerThanASnapshot(t *testing.T) {
+	snap := containerLogsJob(t, "?lines=50")
+	if snap.Timeout != containerJobTimeout || strings.Contains(snap.Command, "--follow") {
+		t.Fatalf("a snapshot is a short job without --follow: %+v", snap)
+	}
+	follow := containerLogsJob(t, "?lines=50&follow=1")
+	if follow.Timeout != followLogsTimeout || !strings.Contains(follow.Command, "--follow --tail 50 --timestamps 'api'") {
+		t.Fatalf("following should run docker logs --follow with a longer timeout: %+v", follow)
 	}
 }

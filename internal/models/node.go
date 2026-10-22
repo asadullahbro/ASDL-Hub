@@ -44,6 +44,20 @@ type Node struct {
 	Containers []NodeContainer `gorm:"serializer:json" json:"containers"`
 }
 
+// NodeSample is one reading of a node's load, for the graphs on its page. Unlike Heartbeat (only the latest per
+// node is kept) these build up, so they are taken at most once a minute and dropped after two weeks.
+type NodeSample struct {
+	ID            uint      `gorm:"primaryKey" json:"-"`
+	NodeID        string    `gorm:"index:idx_node_samples_node_at,priority:1;not null;size:36" json:"-"`
+	At            time.Time `gorm:"index:idx_node_samples_node_at,priority:2;index" json:"at"`
+	CPUPercent    float64   `json:"cpu_percent"`
+	MemoryPercent float64   `json:"memory_percent"`
+	DiskPercent   float64   `json:"disk_percent"`
+	Load1         float64   `json:"load_1"`
+	PingMs        float64   `json:"ping_ms"`
+	WiFiSignal    int       `json:"wifi_signal"`
+}
+
 // Why a node went quiet, as guessed when it came back (NodeOutage.Cause).
 const (
 	OutageCauseReboot     = "reboot"

@@ -473,6 +473,7 @@ For the command line, run: asdl-hub help
 			viewer.GET("/nodes", nodeService.List)
 			viewer.GET("/nodes/uptime", nodeService.Uptime)
 			viewer.GET("/nodes/:id/details", nodeService.GetNodeDetails)
+			viewer.GET("/nodes/:id/samples", nodeService.Samples)
 			viewer.GET("/nodes/:id", nodeService.Get)
 			viewer.GET("/nodes/:id/connection", nodeOps.Connection)
 			viewer.GET("/plugins", pluginService.List)

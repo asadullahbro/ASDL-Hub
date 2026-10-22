@@ -51,6 +51,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.Node{},
 		&models.Heartbeat{},
 		&models.NodeOutage{},
+		&models.NodeSample{},
 		&models.Job{},
 		&models.User{},
 		&models.Session{},

@@ -36,7 +36,7 @@ Apps
                               best node is suggested and you are asked)
   rollback <app>              Put an app's previous version back
   restart <app>               Restart an app's container
-  logs <app> [-n lines]       An app's recent logs
+  logs <app> [-n lines] [-f]  An app's recent logs; -f keeps following (up to 10 min)
 
 Nodes
   outages <node>              A node's outages, their likely cause, and when they happen
@@ -202,11 +202,12 @@ func (e *env) run(cmd string, args []string) error {
 	case "logs":
 		fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 		n := fs.Int("n", 100, "lines")
+		f := fs.Bool("f", false, "follow")
 		app, err := parseWithPositional(fs, args, 1, "an app name")
 		if err != nil {
 			return err
 		}
-		return e.logs(c, app[0], *n)
+		return e.logs(c, app[0], *n, *f)
 	case "node":
 		if len(args) < 2 || args[0] != "remove" {
 			return usageError{"expected asdl-hub node remove <node> [--yes]"}

@@ -146,12 +146,14 @@ func trimHeartbeats(db *gorm.DB) int64 {
 	return res.RowsAffected
 }
 
-// StartHeartbeatTrimmer trims shortly after the Hub starts, then hourly.
+// StartHeartbeatTrimmer trims shortly after the Hub starts, then hourly: old heartbeats, and node samples past
+// their two weeks.
 func (s *NodeService) StartHeartbeatTrimmer() {
 	go func() {
 		time.Sleep(20 * time.Second)
 		for {
 			trimHeartbeats(s.db)
+			trimSamples(s.db, time.Now())
 			time.Sleep(time.Hour)
 		}
 	}()

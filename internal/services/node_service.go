@@ -192,6 +192,7 @@ func (s *NodeService) Heartbeat(c *gin.Context) {
 		Timestamp:   time.Now(),
 	}
 	recordHeartbeat(s.db, &heartbeat)
+	recordSample(s.db, &node, req.CPUPercent, heartbeat.Timestamp)
 
 	// The agent shows maintenance mode on its own dashboard.
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "maintenance": node.Maintenance})

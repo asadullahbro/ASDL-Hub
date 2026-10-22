@@ -28,6 +28,7 @@ import { TerminalModal } from '@/components/terminal/TerminalModal';
 import { NodeApps } from '@/components/nodes/NodeApps';
 import { NodeConnection } from '@/components/nodes/NodeConnection';
 import { NodeOutages } from '@/components/nodes/NodeOutages';
+import { NodeMetrics } from '@/components/nodes/NodeMetrics';
 import { NodeMaintenance } from '@/components/nodes/NodeMaintenance';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -260,6 +261,7 @@ export default function NodeDetailPage() {
       <NodeMaintenance node={node} canEdit={canEdit} onChange={loadAll} />
       <NodeConnection nodeId={node.id} />
       <NodeOutages nodeId={node.id} />
+      <NodeMetrics nodeId={node.id} />
 
       {details && (
         <Card title="Health breakdown">

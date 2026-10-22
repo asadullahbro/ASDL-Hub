@@ -10,6 +10,7 @@ import {
   Project,
   NodeDetail,
   NodesUptime,
+  NodeSamples,
   Migration,
   ProjectHealth,
   PaginatedResponse,
@@ -282,6 +283,10 @@ export const api = {
 
   getNodeOutages: (id: string): Promise<NodeDetail> =>
     request<NodeDetail>(`/nodes/${id}/details`),
+
+  // Load readings for a node's graphs, oldest first (Hubs from the release that added them)
+  getNodeSamples: (id: string, hours: number): Promise<NodeSamples> =>
+    request<NodeSamples>(`/nodes/${id}/samples?hours=${hours}`),
 
   getProjectsByNode: (nodeId: string): Promise<Project[]> =>
     request<Project[]>(`/nodes/${nodeId}/projects`),

@@ -162,6 +162,17 @@ var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 // containerJob queues a shell command about one container on a node and
 // returns the job; the dashboard follows it like any other job.
 func (s *NodeOpsService) containerJob(c *gin.Context, command func(name string) string) {
+	s.containerJobFor(c, containerJobTimeout, command)
+}
+
+// containerJobTimeout is how long a one-off container command may run, in seconds.
+const containerJobTimeout = 60
+
+// followLogsTimeout is how long `logs -f` keeps following, in seconds: the job ends by itself after this, so
+// a CLI that was interrupted does not leave `docker logs -f` running on the node for good.
+const followLogsTimeout = 600
+
+func (s *NodeOpsService) containerJobFor(c *gin.Context, timeout int, command func(name string) string) {
 	name := c.Param("name")
 	if !containerNameRe.MatchString(name) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container name"})
@@ -183,7 +194,7 @@ func (s *NodeOpsService) containerJob(c *gin.Context, command func(name string) 
 		Status:     models.JobStatusPending,
 		Command:    command(name),
 		MaxRetries: 0,
-		Timeout:    60,
+		Timeout:    timeout,
 		CreatedAt:  time.Now(),
 	}
 	if err := s.db.Create(&job).Error; err != nil {
@@ -193,11 +204,18 @@ func (s *NodeOpsService) containerJob(c *gin.Context, command func(name string) 
 	c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID})
 }
 
-// ContainerLogs handles POST /nodes/:id/containers/:name/logs?lines=N.
+// ContainerLogs handles POST /nodes/:id/containers/:name/logs?lines=N[&follow=1]. With follow, the job keeps
+// running and its output streams to whoever watches the job (GET /jobs/:id/stream) until it times out.
 func (s *NodeOpsService) ContainerLogs(c *gin.Context) {
 	lines, err := strconv.Atoi(c.DefaultQuery("lines", "200"))
 	if err != nil || lines < 1 || lines > 2000 {
 		lines = 200
+	}
+	if f := c.Query("follow"); f == "1" || f == "true" {
+		s.containerJobFor(c, followLogsTimeout, func(name string) string {
+			return fmt.Sprintf("docker logs --follow --tail %d --timestamps %s 2>&1", lines, shellQuote(name))
+		})
+		return
 	}
 	s.containerJob(c, func(name string) string {
 		return fmt.Sprintf("docker logs --tail %d --timestamps %s 2>&1", lines, shellQuote(name))
