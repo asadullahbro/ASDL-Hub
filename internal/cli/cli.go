@@ -1,13 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
-	"text/tabwriter"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -261,8 +263,76 @@ func parseWithPositional(fs *flag.FlagSet, args []string, want int, what string)
 	return pos, nil
 }
 
-func (e *env) table() *tabwriter.Writer {
-	return tabwriter.NewWriter(e.out, 0, 0, 2, ' ', 0)
+func (e *env) table() *table {
+	return &table{out: e.out}
+}
+
+var ansiCode = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// table aligns tab-separated columns like text/tabwriter with two spaces of padding, but measures
+// a cell without its color codes, which tabwriter would count as visible width.
+type table struct {
+	out io.Writer
+	buf bytes.Buffer
+}
+
+func (t *table) Write(p []byte) (int, error) { return t.buf.Write(p) }
+
+func (t *table) Flush() error {
+	text := t.buf.String()
+	t.buf.Reset()
+	if text == "" {
+		return nil
+	}
+	endsLine := strings.HasSuffix(text, "\n")
+	rows := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	cells := make([][]string, len(rows))
+	maxCols := 0
+	for i, row := range rows {
+		cells[i] = strings.Split(row, "\t")
+		maxCols = max(maxCols, len(cells[i])-1)
+	}
+
+	// A column's width is shared by the consecutive rows that end a cell in it with a tab.
+	widths := make([][]int, len(rows))
+	for i := range widths {
+		widths[i] = make([]int, maxCols)
+	}
+	for col := 0; col < maxCols; col++ {
+		for start := 0; start < len(rows); {
+			if len(cells[start])-1 <= col {
+				start++
+				continue
+			}
+			end, width := start, 0
+			for ; end < len(rows) && len(cells[end])-1 > col; end++ {
+				width = max(width, visibleWidth(cells[end][col])+2)
+			}
+			for i := start; i < end; i++ {
+				widths[i][col] = width
+			}
+			start = end
+		}
+	}
+
+	var out strings.Builder
+	for i, row := range cells {
+		for col, cell := range row {
+			out.WriteString(cell)
+			if col < len(row)-1 {
+				out.WriteString(strings.Repeat(" ", widths[i][col]-visibleWidth(cell)))
+			}
+		}
+		if i < len(cells)-1 || endsLine {
+			out.WriteByte('\n')
+		}
+	}
+	_, err := io.WriteString(t.out, out.String())
+	return err
+}
+
+func visibleWidth(s string) int {
+	return utf8.RuneCountInString(ansiCode.ReplaceAllString(s, ""))
 }
 
 const (
