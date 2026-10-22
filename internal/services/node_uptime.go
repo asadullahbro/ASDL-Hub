@@ -68,9 +68,14 @@ type NodeUptime struct {
 }
 
 func (s *NodeService) uptimeFor(node *models.Node, now, trackedSince time.Time) NodeUptime {
+	return uptimeOf(s.db, node, now, trackedSince)
+}
+
+// uptimeOf is a node's availability, for callers that have a database but no NodeService (placement).
+func uptimeOf(db *gorm.DB, node *models.Node, now, trackedSince time.Time) NodeUptime {
 	u := NodeUptime{NodeID: node.ID}
 	var outages []models.NodeOutage
-	s.db.Where("node_id = ?", node.ID).Order("id DESC").Limit(500).Find(&outages)
+	db.Where("node_id = ?", node.ID).Order("id DESC").Limit(500).Find(&outages)
 	if len(outages) > 0 {
 		last := outages[0]
 		u.LastOutage = &last

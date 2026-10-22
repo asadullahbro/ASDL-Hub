@@ -489,6 +489,7 @@ For the command line, run: asdl-hub help
 			viewer.GET("/projects/:id", projectService.GetProject)
 			viewer.GET("/nodes/:id/projects", projectService.GetProjectsByNode)
 			viewer.GET("/projects/:id/health", healthService.GetProjectHealth)
+			viewer.GET("/projects/:id/placement", healthService.GetPlacement)
 
 			viewer.GET("/migrations", migrationService.ListMigrations)
 			viewer.GET("/migrations/:id", migrationService.GetMigration)

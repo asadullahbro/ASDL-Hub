@@ -418,6 +418,12 @@ func (e *env) move(c *client, app, to string) error {
 	if err != nil {
 		return err
 	}
+	if to == "" {
+		to, err = e.suggestNode(c, p)
+		if err != nil {
+			return err
+		}
+	}
 	n, err := c.findNode(to)
 	if err != nil {
 		return err

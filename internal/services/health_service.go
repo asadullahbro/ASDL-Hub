@@ -405,7 +405,7 @@ func (s *HealthService) failoverImage(project *models.Project) string {
 }
 
 // failoverTarget returns the best online node for project other than its
-// current one, preferring the master node, or nil if there is none.
+// current one, or nil if there is none. See rankPlacements for what "best" means.
 func (s *HealthService) failoverTarget(project *models.Project) *models.Node {
 	var failed []string
 	s.db.Model(&models.Migration{}).
@@ -413,25 +413,11 @@ func (s *HealthService) failoverTarget(project *models.Project) *models.Node {
 			models.MigrationStatusFailed, time.Now().Add(-failoverCooldown)).
 		Pluck("target_node_id", &failed)
 
-	q := s.db.Scopes(models.Available).Where("id != ?", project.NodeID)
-	if len(failed) > 0 {
-		q = q.Where("id NOT IN ?", failed)
-	}
-	var nodes []models.Node
-	q.Order("health_score desc").Find(&nodes)
-	if len(nodes) == 0 {
+	ranked := rankPlacements(placementCandidates(s.db, project, failed, time.Now()))
+	if len(ranked) == 0 {
 		return nil
 	}
-
-	var master models.Setting
-	if s.db.First(&master, "key = ?", "master_node_id").Error == nil {
-		for i := range nodes {
-			if nodes[i].ID == master.Value {
-				return &nodes[i]
-			}
-		}
-	}
-	return &nodes[0]
+	return &ranked[0].Node
 }
 
 // announceDown sends "app down" once per outage; what continues the

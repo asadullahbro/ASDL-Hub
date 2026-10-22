@@ -32,7 +32,8 @@ Apps
   env set <app> [KEY]         Add or change variables; values are asked for
                               at a hidden prompt (the app redeploys)
   env unset <app> [KEY]       Remove variables
-  move <app> <node>           Move an app to another node
+  move <app> [node]           Move an app to another node (without one, the
+                              best node is suggested and you are asked)
   restart <app>               Restart an app's container
   logs <app> [-n lines]       An app's recent logs
 
@@ -179,10 +180,14 @@ func (e *env) run(cmd string, args []string) error {
 		}
 		return e.deploy(c, args[0])
 	case "move":
-		if err := needArgs(args, 2, "an app and a node: asdl-hub move <app> <node>"); err != nil {
+		if err := needArgs(args, 1, "an app, and optionally a node: asdl-hub move <app> [node]"); err != nil {
 			return err
 		}
-		return e.move(c, args[0], args[1])
+		to := ""
+		if len(args) > 1 {
+			to = args[1]
+		}
+		return e.move(c, args[0], to)
 	case "restart":
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err
