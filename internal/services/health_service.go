@@ -244,12 +244,25 @@ func (s *HealthService) checkAllProjects() {
 	// Check all projects at once so one dead node (every check timing out)
 	// doesn't delay the rest; act on the results one by one.
 	healthy := make([]bool, len(projects))
+	// Load the nodes once for the whole round: a query per app, all at the same moment, once flooded the
+	// database with connections.
+	var all []models.Node
+	s.db.Find(&all)
+	nodes := make(map[string]*models.Node, len(all))
+	for i := range all {
+		nodes[all[i].ID] = &all[i]
+	}
 	var wg sync.WaitGroup
 	for i := range projects {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			healthy[i] = s.checkProjectHealth(&projects[i])
+			node := nodes[projects[i].NodeID]
+			if node == nil {
+				log.Printf("❌ Node not found for project %s", projects[i].Name)
+				return
+			}
+			healthy[i] = s.checkHealthOn(&projects[i], node)
 		}(i)
 	}
 	wg.Wait()
@@ -307,6 +320,12 @@ func (s *HealthService) checkProjectHealth(project *models.Project) bool {
 		log.Printf("❌ Node not found for project %s: %v", project.Name, err)
 		return false
 	}
+	return s.checkHealthOn(project, &node)
+}
+
+// checkHealthOn is checkProjectHealth for a node the caller has already loaded.
+func (s *HealthService) checkHealthOn(project *models.Project, nodeRef *models.Node) bool {
+	node := *nodeRef
 
 	if !node.Online {
 		log.Printf("❌ Node %s is offline for project %s", node.Hostname, project.Name)

@@ -3,6 +3,7 @@ package db
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -18,6 +19,14 @@ import (
 // and the web server's debug output, for chasing a problem.
 func ProductionMode() bool {
 	return os.Getenv("PRODUCTION_MODE") != "false"
+}
+
+// maxConns is how many database connections the Hub may hold open: DB_MAX_CONNS, 40 by default.
+func maxConns() int {
+	if n, err := strconv.Atoi(os.Getenv("DB_MAX_CONNS")); err == nil && n > 0 {
+		return n
+	}
+	return 40
 }
 
 func Init(dsn string) (*gorm.DB, error) {
@@ -38,6 +47,16 @@ func Init(dsn string) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// PostgreSQL allows 100 connections (the embedded one is set to that) and the Hub is not its only user,
+	// so the pool is capped. Without a cap, a burst of queries (the health checker looks up every app's node
+	// at once) opened a connection each, ran past the limit, and made the agents' own requests fail with
+	// "node not found". Queries over the cap wait for a free connection instead.
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(maxConns())
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(30 * time.Minute)
 	}
 
 	// Older versions made repository unique even when empty, so only one
