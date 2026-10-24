@@ -177,7 +177,11 @@ func (s *JobService) AppendLogs(c *gin.Context) {
 		return
 	}
 
-	s.logs.Append(job.ID, req.Offset, req.Chunk)
+	// An empty chunk is the agent asking whether this job is still wanted (the
+	// 409 above is the answer); there is nothing to add.
+	if req.Chunk != "" {
+		s.logs.Append(job.ID, req.Offset, req.Chunk)
+	}
 	// Tell the agent how much we have, so it can resend a gap after an outage
 	c.JSON(http.StatusOK, gin.H{"received": s.logs.Total(job.ID)})
 }
