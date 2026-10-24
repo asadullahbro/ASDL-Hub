@@ -494,6 +494,13 @@ changeRole: (userId: string, role: string): Promise<{ updated: boolean }> =>
 deleteUser: (userId: string): Promise<{ deleted: boolean }> =>
   request(`/settings/users/${userId}`, { method: 'DELETE' }),
 
+// The public status page: whether visitors who aren't signed in can see it
+getStatusPageSetting: (): Promise<{ public: boolean }> =>
+  request('/settings/status-page'),
+
+setStatusPageSetting: (isPublic: boolean): Promise<{ public: boolean }> =>
+  request('/settings/status-page', { method: 'PUT', body: JSON.stringify({ public: isPublic }) }),
+
 // Nginx
 updateNginx: (): Promise<{ message: string }> =>
   request('/nginx/update', { method: 'POST' }),

@@ -20,7 +20,7 @@ const hub: Item[] = [
   { href: '/settings/users', name: 'Users', icon: Users, blurb: 'Who can sign in, and what they can do.' },
   { href: '/settings/tokens', name: 'API tokens', icon: KeyRound, blurb: 'Long-lived tokens for scripts, CI and integrations.' },
   { href: '/settings/nodes', name: 'Nodes', icon: Server, blurb: 'Adding nodes, the master node and agent updates.' },
-  { href: '/settings/system', name: 'System', icon: SlidersHorizontal, blurb: 'Hub updates and the Nginx routes.' },
+  { href: '/settings/system', name: 'System', icon: SlidersHorizontal, blurb: 'Hub updates, the status page and the Nginx routes.' },
 ];
 
 function NavGroup({ label, items, pathname }: { label: string; items: Item[]; pathname: string }) {

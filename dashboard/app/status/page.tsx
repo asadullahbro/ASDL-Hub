@@ -24,7 +24,7 @@ function uptime(v: number | null): string {
 
 type Load = { kind: 'loading' } | { kind: 'private' } | { kind: 'error' } | { kind: 'ok'; report: StatusReport; internal: boolean };
 
-// Public once an admin turns it on (asdl-hub status-page on); until then only signed-in users see it.
+// Public once an admin turns it on (Settings, System); until then only signed-in users see it.
 export default function StatusPage() {
   const [state, setState] = useState<Load>({ kind: 'loading' });
 

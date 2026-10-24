@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { HubVersion } from '@/components/settings/HubVersion';
+import { StatusPageSetting } from '@/components/settings/StatusPage';
 import { AdminOnly, failed, useSettingsToast } from '@/components/settings/common';
 import { api } from '@/lib/api';
 
@@ -26,6 +27,7 @@ export default function SystemSettings() {
   return (
     <AdminOnly>
       <HubVersion />
+      <StatusPageSetting />
       <Card
         title="Nginx"
         description="Regenerate and reload the Nginx reverse proxy config from current running projects."
