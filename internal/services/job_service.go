@@ -550,9 +550,44 @@ func (s *JobService) StartStuckJobSweeper() {
 	go func() {
 		for {
 			s.failStuckJobs(time.Now())
+			s.cancelStaleInteractiveJobs(time.Now())
 			time.Sleep(time.Minute)
 		}
 	}()
+}
+
+// staleInteractiveAfter is how long a log or restart request may wait for its node before it is dropped.
+// Someone is waiting on these for a minute at most, and running one that is a day old would restart an app
+// or open a log stream nobody is watching.
+const staleInteractiveAfter = 15 * time.Minute
+
+// interactiveJob reports whether job is one the Hub makes for a person waiting at the dashboard or command
+// line: a log stream, a container's logs or a container restart.
+func interactiveJob(j *models.Job) bool {
+	if j.Type == models.JobTypeLogsFollow {
+		return true
+	}
+	return j.Type == models.JobTypeCommand &&
+		(strings.HasPrefix(j.Command, "docker logs ") || strings.HasPrefix(j.Command, "docker restart "))
+}
+
+// cancelStaleInteractiveJobs cancels interactive jobs that have waited too long for their node to claim them.
+func (s *JobService) cancelStaleInteractiveJobs(now time.Time) {
+	var jobs []models.Job
+	s.db.Where("status = ? AND type IN ? AND created_at < ?", models.JobStatusPending,
+		[]string{models.JobTypeCommand, models.JobTypeLogsFollow}, now.Add(-staleInteractiveAfter)).Find(&jobs)
+	for i := range jobs {
+		j := &jobs[i]
+		if !interactiveJob(j) {
+			continue
+		}
+		j.Status = models.JobStatusCancelled
+		j.Logs += fmt.Sprintf("\n\nThe node did not pick this job up within %s, so it was cancelled: nobody is waiting for it any more.", staleInteractiveAfter)
+		j.CompletedAt = &now
+		j.Environment = nil
+		s.db.Save(j)
+		log.Printf("⚠️ Job %s (%s) waited %s for its node; cancelled", j.ID, j.Type, now.Sub(j.CreatedAt).Round(time.Minute))
+	}
 }
 
 func (s *JobService) failStuckJobs(now time.Time) {

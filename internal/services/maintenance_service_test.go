@@ -2,11 +2,13 @@ package services
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/asdl/hub/internal/models"
 )
@@ -116,30 +118,94 @@ func TestParseWGDump(t *testing.T) {
 	}
 }
 
-func containerLogsJob(t *testing.T, query string) models.Job {
+func containerLogsRequest(t *testing.T, query string, caps []string) (*httptest.ResponseRecorder, *gorm.DB) {
 	t.Helper()
 	_, _, db := newFailoverEnv(t)
+	// A struct update, because the JSON serializer of Capabilities doesn't run for a plain column update.
+	db.Model(&models.Node{}).Where("id = ?", "good").Select("capabilities").Updates(&models.Node{Capabilities: caps})
 	ops := NewNodeOpsService(db, NewDeployer(db))
 	c, w := newTestContext(http.MethodPost, "/nodes/good/containers/api/logs"+query, "")
 	c.Params = gin.Params{{Key: "id", Value: "good"}, {Key: "name", Value: "api"}}
 	ops.ContainerLogs(c)
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("status %d: %s", w.Code, w.Body.String())
-	}
-	var job models.Job
-	if err := db.First(&job, "node_id = ?", "good").Error; err != nil {
-		t.Fatal(err)
-	}
-	return job
+	return w, db
 }
 
-func TestContainerLogs_FollowKeepsTheJobRunningLongerThanASnapshot(t *testing.T) {
-	snap := containerLogsJob(t, "?lines=50")
-	if snap.Timeout != containerJobTimeout || strings.Contains(snap.Command, "--follow") {
-		t.Fatalf("a snapshot is a short job without --follow: %+v", snap)
+func jobsOn(db *gorm.DB, nodeID string) []models.Job {
+	var jobs []models.Job
+	db.Where("node_id = ?", nodeID).Find(&jobs)
+	return jobs
+}
+
+func TestContainerLogs_SnapshotNeedsNoSpecialAgent(t *testing.T) {
+	w, db := containerLogsRequest(t, "?lines=50", nil)
+	jobs := jobsOn(db, "good")
+	if w.Code != http.StatusAccepted || len(jobs) != 1 {
+		t.Fatalf("status %d, %d jobs: %s", w.Code, len(jobs), w.Body.String())
 	}
-	follow := containerLogsJob(t, "?lines=50&follow=1")
-	if follow.Timeout != followLogsTimeout || !strings.Contains(follow.Command, "--follow --tail 50 --timestamps 'api'") {
-		t.Fatalf("following should run docker logs --follow with a longer timeout: %+v", follow)
+	if j := jobs[0]; j.Type != models.JobTypeCommand || j.Timeout != containerJobTimeout || strings.Contains(j.Command, "--follow") {
+		t.Fatalf("a snapshot is a short command job without --follow: %+v", j)
+	}
+}
+
+func TestContainerLogs_FollowIsAStreamJobForAnAgentThatSupportsIt(t *testing.T) {
+	w, db := containerLogsRequest(t, "?lines=50&follow=1", []string{"bash", followLogsCapability})
+	jobs := jobsOn(db, "good")
+	if w.Code != http.StatusAccepted || len(jobs) != 1 {
+		t.Fatalf("status %d, %d jobs: %s", w.Code, len(jobs), w.Body.String())
+	}
+	j := jobs[0]
+	if j.Type != models.JobTypeLogsFollow || j.Timeout != followLogsTimeout || !strings.Contains(j.Command, "--follow --tail 50 --timestamps 'api'") {
+		t.Fatalf("following runs docker logs --follow as a logs_follow job with a time limit: %+v", j)
+	}
+}
+
+func TestContainerLogs_FollowIsRefusedForAnAgentThatWouldGetStuck(t *testing.T) {
+	for _, caps := range [][]string{nil, {"bash", "docker"}} {
+		w, db := containerLogsRequest(t, "?follow=1", caps)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "too old to follow logs") {
+			t.Fatalf("want 409 for an agent without the capability, got %d: %s", w.Code, w.Body.String())
+		}
+		if n := len(jobsOn(db, "good")); n != 0 {
+			t.Fatalf("no job may be queued for an agent that would get stuck on it, got %d", n)
+		}
+	}
+}
+
+func TestStaleInteractiveJobs_AreCancelledAfterAWhile(t *testing.T) {
+	svc, db := newJobTestService(t)
+	now := time.Now()
+	old := now.Add(-time.Hour)
+	mk := func(id, typ, cmd string, created time.Time) {
+		db.Create(&models.Job{ID: id, NodeID: "n1", Type: typ, Status: models.JobStatusPending, Command: cmd, CreatedAt: created})
+	}
+	mk("follow-old", models.JobTypeLogsFollow, "docker logs --follow --tail 10 'api'", old)
+	mk("oldstyle-follow", models.JobTypeCommand, "docker logs --follow --tail 10 --timestamps 'api' 2>&1", old)
+	mk("restart-old", models.JobTypeCommand, "docker restart 'api'", old)
+	mk("snapshot-old", models.JobTypeCommand, "docker logs --tail 10 --timestamps 'api' 2>&1", old)
+	mk("follow-new", models.JobTypeLogsFollow, "docker logs --follow 'api'", now.Add(-time.Minute))
+	mk("generic-old", models.JobTypeCommand, "./nightly-backup.sh", old)
+	mk("deploy-old", models.JobTypeDeploy, "docker run something", old)
+
+	svc.cancelStaleInteractiveJobs(now)
+
+	status := func(id string) string {
+		var j models.Job
+		db.First(&j, "id = ?", id)
+		return j.Status
+	}
+	for _, id := range []string{"follow-old", "oldstyle-follow", "restart-old", "snapshot-old"} {
+		if status(id) != models.JobStatusCancelled {
+			t.Errorf("%s waited an hour and should be cancelled, is %s", id, status(id))
+		}
+	}
+	for _, id := range []string{"follow-new", "generic-old", "deploy-old"} {
+		if status(id) != models.JobStatusPending {
+			t.Errorf("%s must be left alone, is %s", id, status(id))
+		}
+	}
+	var j models.Job
+	db.First(&j, "id = ?", "follow-old")
+	if j.CompletedAt == nil || !strings.Contains(j.Logs, "nobody is waiting") {
+		t.Errorf("a cancelled job says why: %+v", j)
 	}
 }

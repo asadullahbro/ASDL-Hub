@@ -51,9 +51,11 @@ const (
 )
 
 const (
-	JobTypeDeploy        = "deploy"
-	JobTypeRestart       = "restart"
-	JobTypeCommand       = "command"
+	JobTypeDeploy  = "deploy"
+	JobTypeRestart = "restart"
+	JobTypeCommand = "command"
+	// JobTypeLogsFollow streams a container's logs until its timeout; the agent runs it beside its queue.
+	JobTypeLogsFollow    = "logs_follow"
 	JobTypeBackup        = "backup"
 	JobTypeUpdate        = "update"
 	JobTypeMigrateStart  = "migrate_start"

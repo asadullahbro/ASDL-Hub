@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -162,17 +163,22 @@ var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 // containerJob queues a shell command about one container on a node and
 // returns the job; the dashboard follows it like any other job.
 func (s *NodeOpsService) containerJob(c *gin.Context, command func(name string) string) {
-	s.containerJobFor(c, containerJobTimeout, command)
+	s.containerJobFor(c, models.JobTypeCommand, containerJobTimeout, command)
 }
 
 // containerJobTimeout is how long a one-off container command may run, in seconds.
 const containerJobTimeout = 60
 
-// followLogsTimeout is how long `logs -f` keeps following, in seconds: the job ends by itself after this, so
-// a CLI that was interrupted does not leave `docker logs -f` running on the node for good.
+// followLogsTimeout is how long `logs -f` keeps following, in seconds: the agent stops the job then, so a CLI
+// that was interrupted does not leave `docker logs --follow` running on the node for good.
 const followLogsTimeout = 600
 
-func (s *NodeOpsService) containerJobFor(c *gin.Context, timeout int, command func(name string) string) {
+// followLogsCapability is what an agent reports when it can run a logs_follow job: it enforces job time
+// limits and runs the stream beside its queue. An agent without it would wait on the stream forever and
+// start no other job, so it is never sent one.
+const followLogsCapability = "logs_follow"
+
+func (s *NodeOpsService) containerJobFor(c *gin.Context, jobType string, timeout int, command func(name string) string) {
 	name := c.Param("name")
 	if !containerNameRe.MatchString(name) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container name"})
@@ -190,7 +196,7 @@ func (s *NodeOpsService) containerJobFor(c *gin.Context, timeout int, command fu
 	job := models.Job{
 		ID:         uuid.New().String(),
 		NodeID:     node.ID,
-		Type:       models.JobTypeCommand,
+		Type:       jobType,
 		Status:     models.JobStatusPending,
 		Command:    command(name),
 		MaxRetries: 0,
@@ -212,7 +218,12 @@ func (s *NodeOpsService) ContainerLogs(c *gin.Context) {
 		lines = 200
 	}
 	if f := c.Query("follow"); f == "1" || f == "true" {
-		s.containerJobFor(c, followLogsTimeout, func(name string) string {
+		var node models.Node
+		if s.db.First(&node, "id = ?", c.Param("id")).Error == nil && !slices.Contains(node.Capabilities, followLogsCapability) {
+			c.JSON(http.StatusConflict, gin.H{"error": "the agent on " + node.Hostname + " is too old to follow logs (it would get stuck on the stream); update its agent, then try again, or drop -f for the latest lines"})
+			return
+		}
+		s.containerJobFor(c, models.JobTypeLogsFollow, followLogsTimeout, func(name string) string {
 			return fmt.Sprintf("docker logs --follow --tail %d --timestamps %s 2>&1", lines, shellQuote(name))
 		})
 		return
