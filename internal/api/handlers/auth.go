@@ -66,8 +66,7 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 	}
 	h.limiter.Succeeded(req.Username)
 
-	c.JSON(http.StatusOK, gin.H{
-		"token": token,
+	signedIn(c, token, req.Remember, gin.H{
 		"user": gin.H{
 			"id":       user.ID,
 			"username": user.Username,
@@ -75,6 +74,17 @@ func (h *AuthHandlers) Login(c *gin.Context) {
 			"role":     user.Role,
 		},
 	})
+}
+
+// signedIn answers a successful login: the browser gets its session as a
+// cookie page scripts can't read; the token itself goes in the body only to the
+// command line, which has no cookie jar.
+func signedIn(c *gin.Context, token string, remember bool, body gin.H) {
+	middleware.SetSessionCookie(c, token, remember)
+	if c.GetHeader("X-Hub-Client") == "cli" {
+		body["token"] = token
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 func (h *AuthHandlers) Me(c *gin.Context) {

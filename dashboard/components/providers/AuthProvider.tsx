@@ -3,13 +3,13 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@/types';
-import { api, SIGNED_OUT_EVENT } from '@/lib/api';
+import { api, forgetLegacyLogin, SIGNED_OUT_EVENT } from '@/lib/api';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   logout: () => void;
-  login: (token: string, user: User) => void;
+  login: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -50,26 +50,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (checked.current) return;
     checked.current = true;
 
-    const token = localStorage.getItem('token');
+    forgetLegacyLogin();
 
-    if (!token) {
-      setLoading(false);
-      if (!PUBLIC_ROUTES.includes(pathname) && !isOpenRoute(pathname)) router.push(loginUrl(pathname));
-      return;
-    }
-
+    // The session is an HttpOnly cookie this page can't see: ask the Hub who
+    // it belongs to. No cookie, or an ended session, is a 401.
     api.getMe()
       .then(userData => {
         setUser(userData);
         setLoading(false);
       })
-      .catch((err) => {
-        console.error('getMe failed:', err); // debug log
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+      .catch(() => {
         setUser(null);
         setLoading(false);
-        // An expired token: sign in again, then carry on to the page asked for.
+        // Not signed in, or the session ended: sign in, then carry on to the page asked for.
         if (!PUBLIC_ROUTES.includes(pathname) && !isOpenRoute(pathname)) router.push(loginUrl(pathname));
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,18 +87,14 @@ useEffect(() => {
 }, [pathname, user, loading, router]);
 
 // And in login():
-  const login = (token: string, userData: User) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
+  const login = (userData: User) => {
     setUser(userData);
     router.replace(nextAfterLogin()); // push here instead of in the login page
   };
 
   const logout = () => {
-    // End the session on the Hub too, so the token stops working anywhere.
+    // End the session on the Hub too (it also clears the cookie).
     api.logout().catch(() => {});
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
     setUser(null);
     router.push('/login');
   };

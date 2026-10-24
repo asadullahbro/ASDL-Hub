@@ -60,39 +60,46 @@ export class ApiError extends Error {
   }
 }
 
-// Fired when the Hub refuses this browser's token; AuthProvider then shows
+// Fired when the Hub refuses this browser's session; AuthProvider then shows
 // the sign-in page.
 export const SIGNED_OUT_EVENT = 'asdl:signed-out';
 
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('token');
+// Earlier versions kept the login token and user in localStorage, where any
+// script on the page could read them. The session is now an HttpOnly cookie;
+// this clears what an old visit left behind.
+export function forgetLegacyLogin() {
+  try {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  } catch {
+    /* no storage: nothing to forget */
+  }
 }
 
 async function request<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const token = getAuthToken();
-
   const url = `${API_BASE}${endpoint}`;
+  // The session rides in an HttpOnly cookie the browser sends itself;
+  // X-Requested-With marks the request as the dashboard's own.
   const response = await fetch(url, {
+    credentials: 'include',
+    ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      'X-Requested-With': 'asdl',
+      ...(options?.headers as Record<string, string> | undefined),
     },
-    ...options,
   });
 
   if (response.status === 401) {
     const body = await response.json().catch(() => ({}));
     // The Hub marks the answer signed_out when the token itself is no good
-    // (revoked, expired, ended elsewhere): forget it and go to the sign-in
-    // page, instead of polling on with it. Other 401s, like a wrong password
-    // in a confirm box, leave the session alone.
+    // (revoked, expired, ended elsewhere): go to the sign-in page, instead of
+    // polling on with it. Other 401s, like a wrong password in a confirm box,
+    // leave the session alone.
     if ((body.signed_out || endpoint === '/auth/me') && typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
       window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
     }
     throw new ApiError(401, body.error || 'Unauthorized');
@@ -202,7 +209,7 @@ export const api = {
       body: JSON.stringify({ username, password, remember }),
     }),
 
-  loginTwoFactor: (mfaToken: string, code: string, remember = false): Promise<{ token: string; user: User }> =>
+  loginTwoFactor: (mfaToken: string, code: string, remember = false): Promise<{ user: User }> =>
     request('/auth/2fa/login', {
       method: 'POST',
       body: JSON.stringify({ mfa_token: mfaToken, code, remember }),
@@ -215,7 +222,7 @@ export const api = {
   beginPasskeyLogin: (): Promise<{ ceremony: string; options: unknown }> =>
     request('/auth/passkey/login/begin', { method: 'POST' }),
 
-  finishPasskeyLogin: (ceremony: string, credential: unknown, remember = false): Promise<{ token: string; user: User }> =>
+  finishPasskeyLogin: (ceremony: string, credential: unknown, remember = false): Promise<{ user: User }> =>
     request('/auth/passkey/login/finish', {
       method: 'POST',
       body: JSON.stringify({ ceremony, credential, remember }),

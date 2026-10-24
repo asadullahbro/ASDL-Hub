@@ -56,7 +56,7 @@ export default function LoginPage() {
       const { ceremony, options } = await api.beginPasskeyLogin();
       const credential = await getPasskey(options);
       const response = await api.finishPasskeyLogin(ceremony, credential, remember);
-      login(response.token, response.user);
+      login(response.user);
     } catch (err) {
       setError(passkeyError(err));
     } finally {
@@ -71,7 +71,7 @@ export default function LoginPage() {
     try {
       if (mfaToken) {
         const response = await api.loginTwoFactor(mfaToken, code, remember);
-        login(response.token, response.user);
+        login(response.user);
         return;
       }
       const response = await api.login(username, password, remember);
@@ -79,7 +79,7 @@ export default function LoginPage() {
         setMfaToken(response.mfa_token);
         return;
       }
-      login(response.token, response.user);
+      login(response.user);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       // The code step's token lasts five minutes; after that, start over.

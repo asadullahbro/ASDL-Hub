@@ -25,6 +25,7 @@ func (h *AuthHandlers) Logout(c *gin.Context) {
 	if sid := currentSessionID(c); sid != "" {
 		_ = h.authService.RevokeSession(u.ID, sid)
 	}
+	middleware.ClearSessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{"message": "signed out"})
 }
 
@@ -117,8 +118,7 @@ func (h *AuthHandlers) PasskeyLoginFinish(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"token": token,
+	signedIn(c, token, req.Remember, gin.H{
 		"user": gin.H{
 			"id": user.ID, "username": user.Username, "email": user.Email, "role": user.Role,
 		},

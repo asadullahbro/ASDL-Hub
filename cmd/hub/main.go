@@ -251,6 +251,7 @@ For the command line, run: asdl-hub help
 	// CORS middleware — reflect only allow-listed origins. "*" combined with
 	// credentials is rejected by browsers anyway and defeats the point of CORS.
 	allowedOrigins := getEnvAsStringSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"})
+	services.SetAllowedOrigins(allowedOrigins)
 	router.Use(func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		for _, allowed := range allowedOrigins {
@@ -262,7 +263,7 @@ For the command line, run: asdl-hub help
 			}
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Hub-Client")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

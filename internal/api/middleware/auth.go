@@ -4,7 +4,6 @@ package middleware
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,23 +18,23 @@ func ClientOf(c *gin.Context) services.Client {
 
 func Auth(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := ""
-
-		// Try Authorization header first
-		authHeader := c.GetHeader("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-		}
-
-		// Fall back to query param for WebSocket connections
-		if tokenString == "" {
-			tokenString = c.Query("token")
-		}
+		tokenString, viaCookie := TokenFrom(c)
 
 		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization", "signed_out": true})
 			c.Abort()
 			return
+		}
+
+		// A browser attaches the cookie to any request to this address, from
+		// any site, so a cookie login may only change things when the request
+		// comes from the dashboard itself.
+		if viaCookie && !safeMethod(c.Request.Method) {
+			if !services.SameOrigin(c.Request) || (c.GetHeader("Origin") == "" && c.GetHeader("X-Requested-With") == "") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "cross-site request refused"})
+				c.Abort()
+				return
+			}
 		}
 
 		user, err := authService.ValidateToken(tokenString, ClientOf(c))
@@ -48,6 +47,9 @@ func Auth(authService *services.AuthService) gin.HandlerFunc {
 				if errors.Is(err, known) {
 					msg = known.Error()
 				}
+			}
+			if viaCookie {
+				ClearSessionCookie(c)
 			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": msg, "signed_out": true})
 			c.Abort()

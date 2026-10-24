@@ -42,14 +42,12 @@ export default function StatusPage() {
         }
       }
       // Not public: a signed-in user still gets the page, with every app.
-      if (typeof window !== 'undefined' && localStorage.getItem('token')) {
-        try {
-          const report = await api.getInternalStatus();
-          if (live) setState({ kind: 'ok', report, internal: true });
-          return;
-        } catch {
-          /* fall through to the private message */
-        }
+      try {
+        const report = await api.getInternalStatus();
+        if (live) setState({ kind: 'ok', report, internal: true });
+        return;
+      } catch {
+        /* not signed in: the private message */
       }
       if (live) setState({ kind: 'private' });
     };

@@ -25,9 +25,9 @@ func NewTerminalHandlers(t *services.TerminalService, auth *services.AuthService
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // origin checked via JWT below
-	},
+	// The login cookie rides along on a WebSocket from any site, so only
+	// pages of the Hub itself may open one.
+	CheckOrigin:     services.SameOrigin,
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
@@ -50,8 +50,8 @@ func canOpenTerminal(user *models.User) bool {
 func (h *TerminalHandlers) Terminal(c *gin.Context) {
 	nodeID := c.Param("id")
 
-	// Validate JWT from query param (WebSocket can't send headers)
-	token := c.Query("token")
+	// The login cookie (a WebSocket can't send headers)
+	token, _ := middleware.TokenFrom(c)
 	if token == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 		return

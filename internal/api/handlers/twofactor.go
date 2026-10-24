@@ -50,8 +50,7 @@ func (h *AuthHandlers) LoginTwoFactor(c *gin.Context) {
 		return
 	}
 	h.limiter.Succeeded(user.Username)
-	c.JSON(http.StatusOK, gin.H{
-		"token": token,
+	signedIn(c, token, req.Remember, gin.H{
 		"user": gin.H{
 			"id": user.ID, "username": user.Username, "email": user.Email, "role": user.Role,
 		},

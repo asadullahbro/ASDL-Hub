@@ -28,14 +28,6 @@ export function useJobStream(jobId: string | null, active: boolean, onDone: (sta
 
   useEffect(() => {
     if (!jobId || !active) return;
-    let token: string | null = null;
-    try {
-      token = localStorage.getItem('token');
-    } catch {
-      /* no storage: no live view */
-    }
-    if (!token) return;
-
     let socket: WebSocket | null = null;
     let finished = false;
     let retries = 0;
@@ -43,7 +35,7 @@ export function useJobStream(jobId: string | null, active: boolean, onDone: (sta
     setText('');
 
     const connect = () => {
-      socket = new WebSocket(`${wsBase()}/api/v1/jobs/${jobId}/stream?token=${encodeURIComponent(token!)}`);
+      socket = new WebSocket(`${wsBase()}/api/v1/jobs/${jobId}/stream`);
       socket.onopen = () => {
         retries = 0;
         setLive(true);

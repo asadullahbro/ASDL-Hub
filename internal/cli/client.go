@@ -125,6 +125,7 @@ func (c *client) do(method, path string, body, out interface{}) error {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "asdl-hub-cli")
+	req.Header.Set("X-Hub-Client", "cli") // login answers with the token itself, not a cookie
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("can't reach the Hub at %s: %v", c.url, unwrapURLError(err))

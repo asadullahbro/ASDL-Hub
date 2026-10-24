@@ -142,16 +142,9 @@ export function NodeTerminal({ nodeId, nodeName, onClose }: NodeTerminalProps) {
   // The connection, again on each reconnect.
   useEffect(() => {
     const t = term.current;
-    const token = (() => {
-      try {
-        return localStorage.getItem('token');
-      } catch {
-        return null;
-      }
-    })();
-    if (!t || !token) return;
+    if (!t) return;
     setStatus('connecting');
-    const socket = new WebSocket(`${wsBase()}/api/v1/nodes/${nodeId}/terminal?token=${encodeURIComponent(token)}`);
+    const socket = new WebSocket(`${wsBase()}/api/v1/nodes/${nodeId}/terminal`);
     socket.binaryType = 'arraybuffer';
     ws.current = socket;
     socket.onopen = () => {

@@ -145,8 +145,8 @@ func (h *JobLogHub) Subscribe(id string) (snapshot string, done bool, status str
 var streamUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
-	// Same as the node terminal: the login token in the URL is the check
-	CheckOrigin: func(r *http.Request) bool { return true },
+	// Same as the node terminal: only pages of the Hub itself
+	CheckOrigin: SameOrigin,
 }
 
 // AppendLogs is the agent's side: output of a running job, as it happens.

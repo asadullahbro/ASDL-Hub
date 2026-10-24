@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/asdl/hub/internal/api/middleware"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,7 +66,7 @@ func TestLogin_StopsGuessingAndKeepsRealUsersOut_OfTheWay(t *testing.T) {
 		t.Fatalf("after 8 failures: status %d, Retry-After %q; want 429 with a wait", w.Code, w.Header().Get("Retry-After"))
 	}
 	// Someone else is not affected, and a normal login works.
-	if w := login(r, "198.51.100.4", "alice", "correct-horse"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "token") {
+	if w := login(r, "198.51.100.4", "alice", "correct-horse"); w.Code != http.StatusOK || !hasSessionCookie(w) || strings.Contains(w.Body.String(), "token") {
 		t.Fatalf("a different address: status %d: %s", w.Code, w.Body.String())
 	}
 }
@@ -133,7 +134,7 @@ func TestLogin_WithTwoFactor(t *testing.T) {
 		t.Fatalf("wrong code: %d", w.Code)
 	}
 	w = post(r, "/2fa/login", "198.51.100.4", body(appCode(t, secret, time.Now().Add(30*time.Second))))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"token"`) {
+	if w.Code != http.StatusOK || !hasSessionCookie(w) || strings.Contains(w.Body.String(), `"token"`) {
 		t.Fatalf("right code: %d %s", w.Code, w.Body.String())
 	}
 
@@ -210,4 +211,14 @@ func TestCLIBrowserLogin_OverHTTP(t *testing.T) {
 	if w := poll(o.Code, "guess"); w.Code != http.StatusTooManyRequests {
 		t.Errorf("after many wrong secrets: %d, want 429", w.Code)
 	}
+}
+
+// A browser login sets the session cookie and keeps the token out of the page's reach.
+func hasSessionCookie(w *httptest.ResponseRecorder) bool {
+	for _, c := range w.Result().Cookies() {
+		if c.Name == middleware.SessionCookie && c.Value != "" && c.HttpOnly {
+			return true
+		}
+	}
+	return false
 }

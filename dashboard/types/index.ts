@@ -140,7 +140,7 @@ export interface Passkey {
 
 // The password step either signs in, or says a two-factor code is still needed.
 export type LoginResponse =
-  | { mfa_required?: false; token: string; user: User }
+  | { mfa_required?: false; user: User }
   | { mfa_required: true; mfa_token: string };
 
 export interface Project {

@@ -55,3 +55,56 @@ func TestAuth_SaysWhyATokenWasRefused(t *testing.T) {
 		}
 	}
 }
+
+// The dashboard's cookie login works for reads, but a write must come from the
+// Hub's own pages: the cookie goes along with requests from any site.
+func TestAuth_CookieLoginRefusesCrossSiteWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
+	auth := services.NewAuthService(db, "test-secret")
+	settings := services.NewSettingsService(db, auth, "test-secret")
+	db.Create(&models.User{ID: "u1", Username: "alice", Role: models.RoleAdmin})
+	token, _, err := settings.GeneratePermanentToken("ci", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.Use(Auth(auth))
+	r.GET("/x", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/x", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	call := func(method string, cookie bool, hdr map[string]string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(method, "http://hub.example/x", nil)
+		if cookie {
+			req.AddCookie(&http.Cookie{Name: SessionCookie, Value: token})
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	if got := call("GET", true, nil); got != http.StatusOK {
+		t.Errorf("cookie GET = %d, want 200", got)
+	}
+	if got := call("POST", true, map[string]string{"Origin": "https://evil.example"}); got != http.StatusForbidden {
+		t.Errorf("cookie POST from another site = %d, want 403", got)
+	}
+	if got := call("POST", true, nil); got != http.StatusForbidden {
+		t.Errorf("cookie POST with no Origin or X-Requested-With = %d, want 403", got)
+	}
+	if got := call("POST", true, map[string]string{"Origin": "http://hub.example"}); got != http.StatusOK {
+		t.Errorf("cookie POST from the Hub's own page = %d, want 200", got)
+	}
+	if got := call("POST", true, map[string]string{"X-Requested-With": "asdl"}); got != http.StatusOK {
+		t.Errorf("cookie POST with X-Requested-With = %d, want 200", got)
+	}
+	if got := call("POST", false, map[string]string{"Origin": "https://evil.example"}); got != http.StatusOK {
+		t.Errorf("Bearer POST = %d, want 200 (no cookie, nothing to ride on)", got)
+	}
+}

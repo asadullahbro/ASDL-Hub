@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/asdl/hub/internal/api/middleware"
 	"github.com/asdl/hub/internal/models"
 	"github.com/asdl/hub/internal/services"
 	"github.com/asdl/hub/internal/testutil"
@@ -29,7 +30,7 @@ func tokenFor(t *testing.T, userID string) string {
 	return signed
 }
 
-// Calls the terminal handler the way the browser does (token in the query)
+// Calls the terminal handler the way the browser does (token in the session cookie)
 // and returns the HTTP status. These are plain requests, not WebSocket
 // upgrades, so a request that passes the role check ends in the upgrader's
 // 400 instead of opening a shell: a node is never reached.
@@ -51,12 +52,12 @@ func terminalStatus(t *testing.T, token string) int {
 	router := gin.New()
 	router.GET("/nodes/:id/terminal", h.Terminal)
 
-	url := "/nodes/node-1/terminal"
+	req := httptest.NewRequest(http.MethodGet, "/nodes/node-1/terminal", nil)
 	if token != "" {
-		url += "?token=" + token
+		req.AddCookie(&http.Cookie{Name: middleware.SessionCookie, Value: token})
 	}
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	router.ServeHTTP(rec, req)
 	return rec.Code
 }
 
