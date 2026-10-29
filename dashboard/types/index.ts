@@ -423,6 +423,37 @@ export interface Plugin {
   attached_to: string[];
 }
 
+// Copies of a plugin's data (e.g. Redis) kept on the Hub, so it survives a node failing or a move.
+export interface PluginSnapshot {
+  id: string;
+  project_id: string;
+  plugin_id: string;
+  node_id: string;
+  generation: number;
+  trigger: 'scheduled' | 'move' | 'manual' | 'restore';
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
+}
+
+export interface SnapshotPlugin {
+  plugin_id: string;
+  persist: boolean;
+  snapshots: boolean;
+  interval_minutes: number;
+  last_snapshot_at: string | null;
+  age_seconds: number | null;
+  healthy: boolean;
+  items: PluginSnapshot[];
+}
+
+export interface SnapshotOverview {
+  enabled: boolean;
+  keep: number;
+  max_mb: number;
+  plugins: SnapshotPlugin[];
+}
+
 export interface ProjectPlugin {
   id: string;
   project_id: string;

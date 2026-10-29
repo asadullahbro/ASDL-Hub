@@ -40,6 +40,7 @@ machine automatically if its own goes down.
 | **Failover in ~30 seconds** | Apps are health-checked every 10 seconds. If a machine or app stops answering, the app is redeployed on the healthiest other machine and traffic follows it. |
 | **Private mesh network** | Machines join over WireGuard. Only the Hub is exposed to the internet — a home PC behind a router works as a node. |
 | **Plugins** | Attach companion services like Redis, SearXNG or a Supabase REST API to an app; they run next to it and move with it between machines, and public ones get their own domain. |
+| **Plugin snapshots** | Off by default. Turn them on for a plugin like Redis and the Hub keeps a copy of its data every few minutes (taken on the node, stored on the Hub). After a node failure the next node starts with that data; a planned move takes one last snapshot first, so it loses nothing. Manage them under Snapshots in the dashboard or with `asdl-hub snapshots`. |
 | **Notifications** | Hear about failed deploys, apps going down and moving, nodes going offline and new releases on Discord, Slack, Telegram, ntfy, email or a signed webhook. |
 | **Maintenance mode** | Before working on a machine, one click moves its apps to other nodes with no downtime and keeps new ones off it. |
 | **One dashboard** | Nodes with their containers, logs and connection status, apps, jobs with full logs, health, and a web terminal to each machine. |

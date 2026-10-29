@@ -55,6 +55,7 @@ func (d *Deployer) Dispatch(project *models.Project, node *models.Node, image st
 		PreferredHostPort: d.preferredHostPort(project, node.ID),
 		Plugins:           resolvePlugins(d.db, project),
 	}
+	d.prepareSnapshots(project, node, meta, spec.Plugins)
 
 	var env []string
 	if strings.HasPrefix(image, "ghcr.io/") {
@@ -139,5 +140,26 @@ func (d *Deployer) preferredHostPort(project *models.Project, nodeID string) int
 		if !used[port] {
 			return port
 		}
+	}
+}
+
+// prepareSnapshots gives plugins that keep their data on the Hub what a deploy needs to restore it. On a planned
+// move (the old node is still up) it also asks the old node for a last snapshot and makes the new node wait for
+// it, so a move loses nothing; after a crash the newest stored snapshot is used.
+func (d *Deployer) prepareSnapshots(project *models.Project, node *models.Node, meta DeployMeta, plugins []ResolvedPlugin) {
+	var source models.Node
+	moving := meta.Trigger == TriggerMigration && project.NodeID != "" && project.NodeID != node.ID &&
+		d.db.First(&source, "id = ?", project.NodeID).Error == nil && source.Online
+	for i := range plugins {
+		after := ""
+		if moving && plugins[i].Snapshot != nil && snapshotsEnabled() {
+			fillSnapshot(project, &plugins[i], "")
+			if job, err := newSnapshotJob(d.db, project, source.ID, plugins[i], models.SnapshotMove); err == nil {
+				after = job.ID
+			} else {
+				log.Printf("⚠️ could not queue a final snapshot of %s/%s before the move: %v", project.Name, plugins[i].PluginID, err)
+			}
+		}
+		fillSnapshot(project, &plugins[i], after)
 	}
 }

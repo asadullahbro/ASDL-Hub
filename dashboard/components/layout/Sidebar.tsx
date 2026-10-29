@@ -17,6 +17,7 @@ import {
   X,
   Github,
   Puzzle,
+  Camera,
 } from 'lucide-react';
 
 const navigation: { name: string; href: string; icon: typeof Puzzle; adminOnly?: boolean }[] = [
@@ -28,6 +29,7 @@ const navigation: { name: string; href: string; icon: typeof Puzzle; adminOnly?:
   { name: 'Health',      href: '/health',     icon: Heart },
   { name: 'GitHub', href: '/github', icon: Github },
   { name: 'Plugins', href: '/plugins', icon: Puzzle },
+  { name: 'Snapshots', href: '/snapshots', icon: Camera },
 ];
 
 const bottom = [

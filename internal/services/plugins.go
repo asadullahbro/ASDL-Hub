@@ -8,6 +8,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/asdl/hub/internal/models"
@@ -40,6 +41,62 @@ type PluginManifest struct {
 	// the domain and path chosen when they're attached (like a project).
 	Public  bool `json:"public,omitempty"`
 	Builtin bool `json:"builtin,omitempty"`
+	// Persist makes the plugin able to keep its data on the node's disk. It is
+	// opt-in per attachment through the "persist" variable (default off), so a
+	// plugin without it, or with it off, still starts empty.
+	Persist *PluginPersist `json:"persist,omitempty"`
+}
+
+// PersistVarKey is the variable that switches persistence on for one attachment.
+// SnapshotVarKey (needs persistence) also sends copies to the Hub, every
+// SnapshotMinutesKey minutes, so the data survives the node itself failing.
+const (
+	PersistVarKey          = "persist"
+	SnapshotVarKey         = "snapshot"
+	SnapshotMinutesKey     = "snapshot_minutes"
+	defaultSnapshotMinutes = 5
+	maxSnapshotMinutes     = 1440
+)
+
+// PluginPersist describes the data a plugin can keep.
+type PluginPersist struct {
+	// DataPath inside the container; the node's data folder for this plugin is mounted there.
+	DataPath string `json:"data_path"`
+	// Command replaces the plugin's Command while persistence is on (e.g. to make the server save to DataPath).
+	Command []string `json:"command"`
+	// Before runs inside the running plugin (docker exec) right before a snapshot is taken, to make the data
+	// consistent on disk (e.g. Redis SAVE). Empty means the folder is copied as it is.
+	Before []string `json:"before,omitempty"`
+}
+
+// snapshotOn reports whether the attached values send snapshots to the Hub (only meaningful with persistence on).
+func snapshotOn(values map[string]string) bool {
+	switch strings.ToLower(strings.TrimSpace(values[SnapshotVarKey])) {
+	case "on", "true", "yes", "1":
+		return true
+	}
+	return false
+}
+
+// snapshotMinutes is the chosen interval, clamped to 1 minute..1 day.
+func snapshotMinutes(values map[string]string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(values[SnapshotMinutesKey]))
+	if err != nil || n < 1 {
+		return defaultSnapshotMinutes
+	}
+	if n > maxSnapshotMinutes {
+		return maxSnapshotMinutes
+	}
+	return n
+}
+
+// persistOn reports whether the attached values switch persistence on.
+func persistOn(values map[string]string) bool {
+	switch strings.ToLower(strings.TrimSpace(values[PersistVarKey])) {
+	case "on", "true", "yes", "1":
+		return true
+	}
+	return false
 }
 
 type PluginFile struct {
@@ -67,13 +124,21 @@ var builtinPlugins = []PluginManifest{
 	{
 		ID:          "redis",
 		Name:        "Redis",
-		Description: "A private Redis cache next to the app, protected with a generated password. Starts empty on each node.",
+		Description: "A private Redis next to the app, protected with a generated password. Starts empty on each node; turn on \"persist\" to keep its data on the node's disk across restarts.",
 		Image:       "redis:7-alpine",
 		Port:        6379,
 		Command:     []string{"redis-server", "--requirepass", "{{var.password}}", "--save", "", "--appendonly", "no"},
-		Vars:        []PluginVar{{Key: "password", Label: "Password", Secret: true, GenerateLen: 32}},
-		Provides:    map[string]string{"REDIS_URL": "redis://:{{var.password}}@{{host}}:{{port}}/0"},
-		Builtin:     true,
+		Vars: []PluginVar{
+			{Key: "password", Label: "Password", Secret: true, GenerateLen: 32},
+			{Key: PersistVarKey, Label: "Keep data on this node's disk (on/off)", Default: "off"},
+			{Key: SnapshotVarKey, Label: "Also send snapshots to the Hub, so the data survives the node failing (on/off, needs the setting above)", Default: "off"},
+			{Key: SnapshotMinutesKey, Label: "Minutes between snapshots", Default: "5"},
+		},
+		Persist: &PluginPersist{DataPath: "/data", Command: []string{"redis-server", "--requirepass", "{{var.password}}",
+			"--dir", "/data", "--save", "60", "1", "--appendonly", "no"},
+			Before: []string{"redis-cli", "-a", "{{var.password}}", "--no-auth-warning", "SAVE"}},
+		Provides: map[string]string{"REDIS_URL": "redis://:{{var.password}}@{{host}}:{{port}}/0"},
+		Builtin:  true,
 	},
 	{
 		ID:          "searxng",
@@ -186,6 +251,30 @@ func (m *PluginManifest) Validate() error {
 			return err
 		}
 	}
+	if m.Persist != nil {
+		if !path.IsAbs(m.Persist.DataPath) || path.Clean(m.Persist.DataPath) != m.Persist.DataPath || m.Persist.DataPath == "/" {
+			return fmt.Errorf("persist.data_path %q must be an absolute, clean path below /", m.Persist.DataPath)
+		}
+		if !vars[PersistVarKey] {
+			return fmt.Errorf("a plugin with persist must declare a %q variable (the on/off switch)", PersistVarKey)
+		}
+		if len(m.Persist.Command) == 0 {
+			return fmt.Errorf("persist.command is required (how the plugin starts when it keeps data)")
+		}
+		for i, a := range m.Persist.Command {
+			if err := check(fmt.Sprintf("persist.command[%d]", i), a); err != nil {
+				return err
+			}
+		}
+		for i, a := range m.Persist.Before {
+			if err := check(fmt.Sprintf("persist.before[%d]", i), a); err != nil {
+				return err
+			}
+		}
+		if vars[SnapshotMinutesKey] && !vars[SnapshotVarKey] {
+			return fmt.Errorf("%q needs the %q variable too", SnapshotMinutesKey, SnapshotVarKey)
+		}
+	}
 	for _, f := range m.Files {
 		if !path.IsAbs(f.Path) || path.Clean(f.Path) != f.Path || strings.Contains(f.Path, "..") {
 			return fmt.Errorf("file path %q must be absolute and clean", f.Path)
@@ -241,6 +330,10 @@ type ResolvedPlugin struct {
 	Env           [][2]string // sorted by name
 	Files         []PluginFile
 	Provides      [][2]string // sorted by name
+	// Volumes are host:container mounts for data the plugin keeps (empty unless persistence is on).
+	Volumes []string
+	// Snapshot is set when the data is also sent to the Hub (persistence and snapshots both on).
+	Snapshot *SnapshotSpec
 	// Public plugins publish Port on the node, preferring PreferredHostPort
 	// (the port they had before, so their route stays put).
 	Public            bool
@@ -249,6 +342,17 @@ type ResolvedPlugin struct {
 	// Hash changes whenever anything that affects the container changes, so
 	// an unchanged plugin isn't restarted by a redeploy.
 	Hash string
+}
+
+// SnapshotSpec is what a node needs to take (and the deploy needs to restore) a plugin's snapshots.
+type SnapshotSpec struct {
+	DataDir  string   // host folder holding the plugin's data
+	StateDir string   // host folder for the plugin's snapshot bookkeeping (which generation this node holds)
+	Before   []string // run in the plugin before copying; may be empty
+	Minutes  int
+	// Filled in by the Hub for a deploy, not by Resolve: where to send and fetch snapshots, the token for that,
+	// and (for a planned move) the final snapshot job the deploy should wait for.
+	URL, Token, AfterJob string
 }
 
 // Resolve fills in m's templates for project with the attached values.
@@ -278,7 +382,19 @@ func (m *PluginManifest) Resolve(project *models.Project, vars []models.EnvVar) 
 		Public:        m.Public,
 		Port:          m.Port,
 	}
-	for _, a := range m.Command {
+	command := m.Command
+	if m.Persist != nil && persistOn(values) {
+		command = m.Persist.Command
+		dataDir := fmt.Sprintf("%s/%s/%s/data", PluginDir, project.ID, m.ID)
+		r.Volumes = []string{dataDir + ":" + m.Persist.DataPath}
+		if snapshotOn(values) {
+			r.Snapshot = &SnapshotSpec{DataDir: dataDir, StateDir: fmt.Sprintf("%s/%s/%s", PluginDir, project.ID, m.ID), Minutes: snapshotMinutes(values)}
+			for _, a := range m.Persist.Before {
+				r.Snapshot.Before = append(r.Snapshot.Before, sub(a))
+			}
+		}
+	}
+	for _, a := range command {
 		r.Command = append(r.Command, sub(a))
 	}
 	for _, f := range m.Files {
@@ -288,7 +404,7 @@ func (m *PluginManifest) Resolve(project *models.Project, vars []models.EnvVar) 
 	r.Provides = sortedPairs(m.Provides, sub)
 
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%q\x00%q\x00%q\x00%v", r.Image, r.Command, r.Env, r.Files, r.Public)
+	fmt.Fprintf(h, "%s\x00%q\x00%q\x00%q\x00%v\x00%q", r.Image, r.Command, r.Env, r.Files, r.Public, r.Volumes)
 	r.Hash = hex.EncodeToString(h.Sum(nil))[:16]
 	return r
 }

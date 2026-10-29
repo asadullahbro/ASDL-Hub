@@ -36,6 +36,12 @@ Apps
                               best node is suggested and you are asked)
   rollback <app>              Put an app's previous version back
   restart <app>               Restart an app's container
+  snapshots <app>             Copies of an app's plugin data (e.g. Redis) kept on the Hub
+  snapshot on <app> [plugin]  Keep that data on the node and send copies to the Hub
+                              [--minutes 5]; it then survives a node failing or a move
+  snapshot off <app> [plugin] Stop sending copies [--delete removes the stored ones]
+  snapshot now <app> [plugin] Take one right away
+  snapshot restore|delete <app> <generation> [plugin]
   logs <app> [-n lines] [-f]  An app's recent logs; -f keeps following (up to 10 min)
 
 Nodes
@@ -194,6 +200,13 @@ func (e *env) run(cmd string, args []string) error {
 			return err
 		}
 		return e.rollback(c, args[0])
+	case "snapshots":
+		if err := needArgs(args, 1, "an app name"); err != nil {
+			return err
+		}
+		return e.snapshots(c, args[0])
+	case "snapshot":
+		return e.snapshotCommand(c, args)
 	case "restart":
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err

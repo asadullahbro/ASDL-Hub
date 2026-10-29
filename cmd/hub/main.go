@@ -170,6 +170,23 @@ For the command line, run: asdl-hub help
 	projectService.RepairInvalidPorts()
 	pluginService := services.NewPluginService(database, projectService.RedeployProject)
 
+	// Plugin snapshots: copies of a plugin's data kept on the Hub, so it survives a node failing or a move.
+	// Nodes reach the Hub over the mesh (the routes are mesh-only), so the address is the Hub's mesh IP.
+	snapshotURL := os.Getenv("SNAPSHOT_URL")
+	if snapshotURL == "" && os.Getenv("WG_HUB_IP") != "" {
+		snapshotURL = fmt.Sprintf("http://%s:%d", os.Getenv("WG_HUB_IP"), cfg.Server.Port)
+	}
+	if strings.EqualFold(os.Getenv("SNAPSHOTS"), "off") {
+		snapshotURL = ""
+	}
+	services.SetSnapshotHub(secretsKey, snapshotURL, int64(getEnvAsInt("SNAPSHOT_MAX_MB", 32))<<20, getEnvAsInt("SNAPSHOT_KEEP", 3))
+	snapshotService := services.NewSnapshotService(database, projectService.RedeployProject)
+	if snapshotURL != "" {
+		snapshotService.StartScheduler()
+	} else {
+		log.Println("📸 Plugin snapshots are off (set WG_HUB_IP or SNAPSHOT_URL to turn them on)")
+	}
+
 	// Regenerate nginx when a deploy or project edit changes where a domain points
 	updateRoutes := func() {
 		if err := nginxService.UpdateNginxConfig(); err != nil {
@@ -351,6 +368,10 @@ For the command line, run: asdl-hub help
 			mesh.POST("/jobs/claim", jobService.Claim)
 			mesh.POST("/jobs/:id/logs", jobService.AppendLogs)
 			mesh.POST("/jobs/:id/complete", jobService.Complete)
+			// Plugin snapshots: each also needs the project's own token, so one node can't read another app's data.
+			mesh.POST("/snapshots/:project/:plugin", snapshotService.Upload)
+			mesh.GET("/snapshots/:project/:plugin/meta", snapshotService.Meta)
+			mesh.GET("/snapshots/:project/:plugin/latest", snapshotService.Latest)
 		}
 
 		public.GET("/status/apps", statusService.Public)
@@ -684,6 +705,12 @@ echo "Agent updated successfully"
 		protected.POST("/projects/:id/plugins", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Attach)
 		protected.DELETE("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Detach)
 		protected.PUT("/projects/:id/plugins/:plugin", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), pluginService.Update)
+		protected.GET("/projects/:id/snapshots", snapshotService.List)
+		protected.POST("/projects/:id/snapshots", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), snapshotService.TakeNow)
+		protected.DELETE("/projects/:id/snapshots", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), snapshotService.DeleteAll)
+		protected.DELETE("/projects/:id/snapshots/:snapshot", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), snapshotService.Delete)
+		protected.GET("/projects/:id/snapshots/:snapshot/download", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), snapshotService.Download)
+		protected.POST("/projects/:id/snapshots/:snapshot/restore", middleware.RequireRole(models.RoleAdmin, models.RoleOperator), snapshotService.Restore)
 		notifications := protected.Group("/notifications")
 		notifications.Use(middleware.RequireRole(models.RoleAdmin))
 		{

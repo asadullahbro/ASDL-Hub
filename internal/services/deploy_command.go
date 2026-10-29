@@ -174,7 +174,13 @@ func writePlugins(b *strings.Builder, p *models.Project, plugins []ResolvedPlugi
 	fmt.Fprintf(b, "docker network inspect %s >/dev/null 2>&1 || docker network create --label asdl.project=%s %s >/dev/null\n", net, p.ID, net)
 	for i, pl := range plugins {
 		cn := shellQuote(pl.ContainerName)
-		fmt.Fprintf(b, "if [ \"$(docker inspect -f '{{index .Config.Labels \"asdl.plugin-hash\"}}' %s 2>/dev/null)\" = %s ] && [ \"$(docker inspect -f '{{.State.Running}}' %s 2>/dev/null)\" = true ]; then\n", cn, shellQuote(pl.Hash), cn)
+		// A plugin whose data is also kept on the Hub first checks whether the Hub holds newer data than this node.
+		needsRestore := ""
+		if pl.Snapshot != nil {
+			writeSnapshotCheck(b, i, pl, &env)
+			needsRestore = fmt.Sprintf(` && [ "$NEED%d" != yes ]`, i)
+		}
+		fmt.Fprintf(b, "if [ \"$(docker inspect -f '{{index .Config.Labels \"asdl.plugin-hash\"}}' %s 2>/dev/null)\" = %s ] && [ \"$(docker inspect -f '{{.State.Running}}' %s 2>/dev/null)\" = true ]%s; then\n", cn, shellQuote(pl.Hash), cn, needsRestore)
 		fmt.Fprintf(b, "  echo 'plugin %s unchanged'\n", pl.PluginID)
 		if pl.Public {
 			fmt.Fprintf(b, "  echo \"%s%s:$(docker port %s %d/tcp | head -n1 | sed 's/.*://')\"\n", PluginPortMarker, pl.PluginID, cn, pl.Port)
@@ -195,6 +201,13 @@ func writePlugins(b *strings.Builder, p *models.Project, plugins []ResolvedPlugi
 				fmt.Fprintf(b, "  printf '%%s' \"$%s\" > %s && chmod 644 %s\n", v, shellQuote(file), shellQuote(file))
 				opts = append(opts, "-v", shellQuote(file+":"+f.Path+":ro"))
 			}
+		}
+		for _, vol := range pl.Volumes {
+			fmt.Fprintf(b, "  mkdir -p %s\n", shellQuote(strings.SplitN(vol, ":", 2)[0]))
+			opts = append(opts, "-v", shellQuote(vol))
+		}
+		if pl.Snapshot != nil {
+			writeSnapshotRestore(b, i, pl)
 		}
 		for j, kv := range pl.Env {
 			v := fmt.Sprintf("ASDL_PLUGIN_%d_E%d", i, j)

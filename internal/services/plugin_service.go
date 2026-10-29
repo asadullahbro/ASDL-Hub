@@ -353,6 +353,7 @@ func (s *PluginService) Detach(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": project.Name + " doesn't have that plugin"})
 		return
 	}
+	s.db.Where("project_id = ? AND plugin_id = ?", project.ID, c.Param("plugin")).Delete(&models.PluginSnapshot{})
 	log.Printf("🧩 Removed plugin %s from %s", c.Param("plugin"), project.Name)
 	if s.routesChanged != nil {
 		go s.routesChanged()

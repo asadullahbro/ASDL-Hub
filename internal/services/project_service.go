@@ -476,6 +476,7 @@ func (s *ProjectService) DeleteProject(c *gin.Context) {
 	}
 
 	s.db.Where("project_id = ?", id).Delete(&models.ProjectPlugin{})
+	s.db.Where("project_id = ?", id).Delete(&models.PluginSnapshot{})
 	if err := s.db.Delete(&project).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

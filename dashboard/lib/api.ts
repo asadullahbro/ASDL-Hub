@@ -29,6 +29,7 @@ import {
   MaintenanceResult,
   Plugin,
   ProjectPlugin,
+  SnapshotOverview,
   NotificationType,
   NotificationEvent,
   NotificationChannel,
@@ -146,6 +147,24 @@ export const api = {
 
   detachPlugin: (projectId: string, pluginId: string): Promise<{ redeploying: boolean }> =>
     request<{ redeploying: boolean }>(`/projects/${projectId}/plugins/${pluginId}`, { method: 'DELETE' }),
+
+  // Change an attached plugin's settings (only the ones sent); the project redeploys.
+  updatePluginVars: (projectId: string, pluginId: string, vars: { key: string; value: string }[]): Promise<{ redeploying?: boolean }> =>
+    request<{ redeploying?: boolean }>(`/projects/${projectId}/plugins/${pluginId}`, { method: 'PUT', body: JSON.stringify({ vars }) }),
+
+  // Plugin snapshots (data kept on the Hub)
+  getSnapshots: (projectId: string): Promise<SnapshotOverview> =>
+    request<SnapshotOverview>(`/projects/${projectId}/snapshots`),
+  takeSnapshot: (projectId: string, pluginId: string): Promise<{ job_id: string }> =>
+    request<{ job_id: string }>(`/projects/${projectId}/snapshots`, { method: 'POST', body: JSON.stringify({ plugin_id: pluginId }) }),
+  restoreSnapshot: (projectId: string, snapshotId: string): Promise<{ generation: number; redeploying: boolean }> =>
+    request<{ generation: number; redeploying: boolean }>(`/projects/${projectId}/snapshots/${snapshotId}/restore`, { method: 'POST', body: '{}' }),
+  deleteSnapshot: (projectId: string, snapshotId: string): Promise<void> =>
+    request<void>(`/projects/${projectId}/snapshots/${snapshotId}`, { method: 'DELETE' }),
+  deleteSnapshots: (projectId: string, pluginId: string): Promise<{ deleted: number }> =>
+    request<{ deleted: number }>(`/projects/${projectId}/snapshots?plugin_id=${encodeURIComponent(pluginId)}`, { method: 'DELETE' }),
+  snapshotDownloadUrl: (projectId: string, snapshotId: string): string =>
+    `${API_BASE}/projects/${projectId}/snapshots/${snapshotId}/download`,
 
   removeCustomPlugin: (id: string): Promise<void> =>
     request<void>(`/plugins/custom/${id}`, { method: 'DELETE' }),

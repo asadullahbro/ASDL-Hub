@@ -142,8 +142,12 @@ func TestAttachPlugin_GeneratesSecretsAndRedeploys(t *testing.T) {
 	}
 	var pp models.ProjectPlugin
 	db.First(&pp, "project_id = ?", "p1")
-	if len(pp.Vars) != 1 || len(pp.Vars[0].Value) != 32 {
-		t.Fatalf("expected a generated 32-char password, got %+v", pp.Vars)
+	vals := map[string]string{}
+	for _, v := range pp.Vars {
+		vals[v.Key] = v.Value
+	}
+	if len(pp.Vars) != 4 || len(vals["password"]) != 32 || vals[PersistVarKey] != "off" || vals[SnapshotVarKey] != "off" || vals[SnapshotMinutesKey] != "5" {
+		t.Fatalf("expected a generated 32-char password, persist and snapshots off and 5 minutes by default, got %+v", pp.Vars)
 	}
 
 	// The deployer now includes it.
@@ -239,5 +243,118 @@ func TestUpdatePlugin_OnlyRedeploysWhenSettingsChange(t *testing.T) {
 	}
 	if got["db_uri"] != "postgresql://a@y:1/p" || got["jwt_secret"] != "s" {
 		t.Errorf("vars = %v; the untouched secret must be kept", got)
+	}
+}
+
+func redisManifest(t *testing.T) PluginManifest {
+	t.Helper()
+	for _, m := range builtinPlugins {
+		if m.ID == "redis" {
+			return m
+		}
+	}
+	t.Fatal("no redis plugin")
+	return PluginManifest{}
+}
+
+func TestPersistentPlugin_IsOffUnlessSwitchedOn(t *testing.T) {
+	PluginDir = t.TempDir()
+	project := &models.Project{ID: "p-9", Name: "chat", Ports: []string{"9000:8000"}}
+	redis := redisManifest(t)
+
+	// Off (the default, and what every existing attachment without the variable gets): starts empty, nothing mounted.
+	for name, vars := range map[string][]models.EnvVar{
+		"no variable":  {{Key: "password", Value: "pw"}},
+		"explicit off": {{Key: "password", Value: "pw"}, {Key: PersistVarKey, Value: "off"}},
+	} {
+		rp := redis.Resolve(project, vars)
+		if len(rp.Volumes) != 0 || !strings.Contains(strings.Join(rp.Command, " "), `--save  --appendonly no`) {
+			t.Errorf("%s: volumes=%v command=%v; want no mount and saving off", name, rp.Volumes, rp.Command)
+		}
+	}
+
+	// On: the data folder is mounted at /data, Redis saves there, and the container is recreated (hash changes).
+	off := redis.Resolve(project, []models.EnvVar{{Key: "password", Value: "pw"}})
+	on := redis.Resolve(project, []models.EnvVar{{Key: "password", Value: "pw"}, {Key: PersistVarKey, Value: "on"}})
+	if on.Hash == off.Hash {
+		t.Error("switching persistence on must change the plugin hash so the container is recreated")
+	}
+	if want := filepath.Join(PluginDir, "p-9", "redis", "data") + ":/data"; len(on.Volumes) != 1 || on.Volumes[0] != want {
+		t.Fatalf("volumes = %v, want [%s]", on.Volumes, want)
+	}
+	if cmd := strings.Join(on.Command, " "); !strings.Contains(cmd, "--dir /data --save 60 1") || !strings.Contains(cmd, "--requirepass pw") {
+		t.Errorf("command = %q; want it to save into /data and keep the password", cmd)
+	}
+
+	script, env := BuildDeployCommand(DeploySpec{Project: project, Image: "img", Plugins: []ResolvedPlugin{on}})
+	calls, out, err := runWithFakeDocker(t, script, env, nil, false)
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	dir := filepath.Join(PluginDir, "p-9", "redis", "data")
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		t.Errorf("the data folder %s must be created on the node: %v", dir, err)
+	}
+	if !strings.Contains(calls, dir+":/data") {
+		t.Errorf("the data folder must be mounted into the plugin:\n%s", calls)
+	}
+
+	// Off again: no mount.
+	script, env = BuildDeployCommand(DeploySpec{Project: project, Image: "img", Plugins: []ResolvedPlugin{off}})
+	calls, _, _ = runWithFakeDocker(t, script, env, nil, false)
+	if strings.Contains(calls, ":/data") {
+		t.Errorf("persistence is off, nothing should be mounted:\n%s", calls)
+	}
+}
+
+func TestPersistentPlugin_ManifestValidation(t *testing.T) {
+	base := PluginManifest{ID: "db", Name: "DB", Image: "x:1", Port: 1, Vars: []PluginVar{{Key: PersistVarKey}},
+		Provides: map[string]string{"DB_URL": "http://{{host}}"}, Persist: &PluginPersist{DataPath: "/data", Command: []string{"serve"}}}
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bad := map[string]func(m *PluginManifest){
+		"no switch variable": func(m *PluginManifest) { m.Vars = nil },
+		"relative path":      func(m *PluginManifest) { m.Persist = &PluginPersist{DataPath: "data", Command: []string{"serve"}} },
+		"root path":          func(m *PluginManifest) { m.Persist = &PluginPersist{DataPath: "/", Command: []string{"serve"}} },
+		"dotdot path":        func(m *PluginManifest) { m.Persist = &PluginPersist{DataPath: "/a/../b", Command: []string{"serve"}} },
+		"no command":         func(m *PluginManifest) { m.Persist = &PluginPersist{DataPath: "/data"} },
+		"undeclared var": func(m *PluginManifest) {
+			m.Persist = &PluginPersist{DataPath: "/data", Command: []string{"{{var.nope}}"}}
+		},
+	}
+	for name, mutate := range bad {
+		m := base
+		mutate(&m)
+		if m.Validate() == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestUpdatePlugin_TogglingPersistRedeploys(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Update("node_id", "good")
+	// An attachment made before the feature existed has no persist variable at all.
+	db.Create(&models.ProjectPlugin{ID: "pp2", ProjectID: "p1", PluginID: "redis", Vars: models.SecretEnvVars{{Key: "password", Value: "pw"}}})
+	redeployed := 0
+	svc := NewPluginService(db, func(*models.Project) error { redeployed++; return nil })
+	put := func(body string) int {
+		c, w := newTestContext(http.MethodPut, "/projects/p1/plugins/redis", body)
+		c.Params = gin.Params{{Key: "id", Value: "p1"}, {Key: "plugin", Value: "redis"}}
+		svc.Update(c)
+		return w.Code
+	}
+	if code := put(`{"vars":[{"key":"persist","value":"on"}]}`); code != http.StatusOK || redeployed != 1 {
+		t.Fatalf("persist on: %d, redeployed %d; want 200 and a redeploy", code, redeployed)
+	}
+	var pp models.ProjectPlugin
+	db.First(&pp, "id = ?", "pp2")
+	got := map[string]string{}
+	for _, v := range pp.Vars {
+		got[v.Key] = v.Value
+	}
+	if got[PersistVarKey] != "on" || got["password"] != "pw" {
+		t.Errorf("vars = %v; persist must be on and the password kept", got)
 	}
 }
