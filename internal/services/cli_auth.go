@@ -183,7 +183,7 @@ func (c *CLIAuth) Approve(code string, user *models.User) error {
 	var err error
 	if user.Role == models.RoleAdmin {
 		name := fmt.Sprintf("asdl-hub CLI (%s@%s)", user.Username, r.machine)
-		token, _, err = c.settings.GeneratePermanentToken(name, user.ID)
+		token, _, err = c.settings.GeneratePermanentToken(name, user.ID, ScopeAdmin)
 	} else {
 		token, err = c.auth.issueSession(user, SessionOptions{
 			Client: Client{IP: r.ip, UserAgent: "asdl-hub-cli"},

@@ -21,7 +21,7 @@ func TestAuth_SaysWhyATokenWasRefused(t *testing.T) {
 	auth := services.NewAuthService(db, "test-secret")
 	settings := services.NewSettingsService(db, auth, "test-secret")
 	db.Create(&models.User{ID: "u1", Username: "alice", Role: models.RoleAdmin})
-	token, pt, err := settings.GeneratePermanentToken("ci", "u1")
+	token, pt, err := settings.GeneratePermanentToken("ci", "u1", services.ScopeAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAuth_CookieLoginRefusesCrossSiteWrites(t *testing.T) {
 	auth := services.NewAuthService(db, "test-secret")
 	settings := services.NewSettingsService(db, auth, "test-secret")
 	db.Create(&models.User{ID: "u1", Username: "alice", Role: models.RoleAdmin})
-	token, _, err := settings.GeneratePermanentToken("ci", "u1")
+	token, _, err := settings.GeneratePermanentToken("ci", "u1", services.ScopeAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,5 +106,50 @@ func TestAuth_CookieLoginRefusesCrossSiteWrites(t *testing.T) {
 	}
 	if got := call("POST", false, map[string]string{"Origin": "https://evil.example"}); got != http.StatusOK {
 		t.Errorf("Bearer POST = %d, want 200 (no cookie, nothing to ride on)", got)
+	}
+}
+
+// A read-only token owned by an admin reaches what a viewer reaches and is
+// refused on operator and admin routes, through the real role guards.
+func TestAuth_ScopedTokenIsHeldToItsScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testutil.NewDB(t, &models.User{}, &models.PermanentToken{}, &models.Session{}, &models.Passkey{})
+	auth := services.NewAuthService(db, "test-secret")
+	settings := services.NewSettingsService(db, auth, "test-secret")
+	db.Create(&models.User{ID: "u1", Username: "alice", Role: models.RoleAdmin})
+
+	r := gin.New()
+	r.Use(Auth(auth))
+	ok := func(c *gin.Context) { c.Status(http.StatusOK) }
+	r.GET("/apps", ok)
+	r.POST("/apps/redeploy", RequireRole(models.RoleAdmin, models.RoleOperator), ok)
+	r.GET("/settings/tokens", RequireRole(models.RoleAdmin), ok)
+
+	status := func(scope, method, path string) int {
+		tok, _, err := settings.GeneratePermanentToken("t", "u1", scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+	cases := []struct {
+		scope, method, path string
+		want                int
+	}{
+		{services.ScopeRead, "GET", "/apps", 200},
+		{services.ScopeRead, "POST", "/apps/redeploy", 403},
+		{services.ScopeRead, "GET", "/settings/tokens", 403},
+		{services.ScopeOperate, "POST", "/apps/redeploy", 200},
+		{services.ScopeOperate, "GET", "/settings/tokens", 403},
+		{services.ScopeAdmin, "GET", "/settings/tokens", 200},
+	}
+	for _, c := range cases {
+		if got := status(c.scope, c.method, c.path); got != c.want {
+			t.Errorf("%s token %s %s = %d, want %d", c.scope, c.method, c.path, got, c.want)
+		}
 	}
 }

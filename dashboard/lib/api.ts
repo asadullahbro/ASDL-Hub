@@ -19,6 +19,7 @@ import {
   AllNodesHealthResponse,
   ClusterStatus,
   PermanentToken,
+  TokenScope,
   NodeHealth,
   AllProjectsHealthResponse,
   EnrollmentToken,
@@ -451,10 +452,10 @@ verifyPassword: (password: string): Promise<{ verified: boolean }> =>
 listTokens: (): Promise<PermanentToken[]> =>
   request<PermanentToken[]>('/settings/tokens'),
 
-generateToken: (name: string, password: string): Promise<{ token: string; meta: PermanentToken }> =>
+generateToken: (name: string, scope: TokenScope, password: string): Promise<{ token: string; meta: PermanentToken }> =>
   request('/settings/tokens', {
     method: 'POST',
-    body: JSON.stringify({ name, password }),
+    body: JSON.stringify({ name, scope, password }),
   }),
 
 revokeToken: (id: string): Promise<{ revoked: boolean }> =>

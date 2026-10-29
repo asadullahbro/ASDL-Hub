@@ -315,10 +315,13 @@ export interface AllProjectsHealthResponse {
   healthy: number;
   unhealthy: number;
 }
+export type TokenScope = 'read' | 'operate' | 'admin';
+
 export interface PermanentToken {
   id: string;
   name: string;
   token_hint: string;
+  scope: TokenScope;
   created_by: string;
   created_at: string;
 }

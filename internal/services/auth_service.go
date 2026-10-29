@@ -93,6 +93,8 @@ func (s *AuthService) ValidateToken(tokenString string, client Client) (*models.
 		if err := s.db.First(&user, "id = ?", pt.CreatedBy).Error; err != nil {
 			return nil, errUnknownUser
 		}
+		// A scoped token never does more than its scope, even for an admin.
+		user.Role = CapRole(user.Role, pt.Scope)
 		return &user, nil
 	}
 

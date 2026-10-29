@@ -76,10 +76,13 @@ type Setting struct {
 
 // PermanentToken — long-lived API tokens
 type PermanentToken struct {
-	ID        string         `gorm:"primaryKey;size:36" json:"id"`
-	Name      string         `gorm:"size:100;not null" json:"name"`
-	Token     string         `gorm:"uniqueIndex;size:500;not null" json:"-"`
-	TokenHint string         `gorm:"size:20" json:"token_hint"` // last 8 chars shown in UI
+	ID        string `gorm:"primaryKey;size:36" json:"id"`
+	Name      string `gorm:"size:100;not null" json:"name"`
+	Token     string `gorm:"uniqueIndex;size:500;not null" json:"-"`
+	TokenHint string `gorm:"size:20" json:"token_hint"` // last 8 chars shown in UI
+	// Scope caps what the token may do, whatever its owner can: read, operate
+	// or admin. Tokens made before scopes existed have none and keep full access.
+	Scope     string         `gorm:"size:20;default:admin" json:"scope"`
 	CreatedBy string         `gorm:"size:36" json:"created_by"`
 	CreatedAt time.Time      `json:"created_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

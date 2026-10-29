@@ -57,16 +57,24 @@ func (h *SettingsHandlers) GenerateToken(c *gin.Context) {
 	var req struct {
 		Name     string `json:"name" binding:"required"`
 		Password string `json:"password" binding:"required"`
+		Scope    string `json:"scope"` // read, operate or admin; left out means admin, as before scopes existed
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Scope == "" {
+		req.Scope = services.ScopeAdmin
+	}
+	if !services.ValidScope(req.Scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be read, operate or admin"})
 		return
 	}
 	if err := h.settings.VerifyAdminPassword(user.ID, req.Password); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	tokenString, pt, err := h.settings.GeneratePermanentToken(req.Name, user.ID)
+	tokenString, pt, err := h.settings.GeneratePermanentToken(req.Name, user.ID, req.Scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

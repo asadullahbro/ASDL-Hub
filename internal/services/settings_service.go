@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -41,7 +42,36 @@ func (s *SettingsService) VerifyAdminPassword(userID, password string) error {
 
 // --- Permanent tokens ---
 
-func (s *SettingsService) GeneratePermanentToken(name, createdBy string) (string, *models.PermanentToken, error) {
+// Token scopes. A token acts with its owner's role, lowered to the role its
+// scope names, so every check on the role holds for tokens too.
+const (
+	ScopeRead    = "read"    // view only (viewer)
+	ScopeOperate = "operate" // deploy, restart, move (operator)
+	ScopeAdmin   = "admin"   // everything its owner can do
+)
+
+var scopeRole = map[string]string{ScopeRead: models.RoleViewer, ScopeOperate: models.RoleOperator, ScopeAdmin: models.RoleAdmin}
+
+var roleRank = map[string]int{models.RoleViewer: 1, models.RoleOperator: 2, models.RoleAdmin: 3}
+
+// ValidScope reports whether scope is one a token can be made with.
+func ValidScope(scope string) bool { _, ok := scopeRole[scope]; return ok }
+
+// CapRole is the role a token of scope scope acts with for an owner of role
+// role: the lower of the two. An empty scope (a token from before scopes)
+// leaves the owner's role as it is.
+func CapRole(role, scope string) string {
+	limit, ok := scopeRole[scope]
+	if !ok || roleRank[limit] >= roleRank[role] {
+		return role
+	}
+	return limit
+}
+
+func (s *SettingsService) GeneratePermanentToken(name, createdBy, scope string) (string, *models.PermanentToken, error) {
+	if !ValidScope(scope) {
+		return "", nil, fmt.Errorf("scope must be read, operate or admin")
+	}
 	claims := jwt.MapClaims{
 		"token_id": uuid.New().String(),
 		"type":     "permanent",
@@ -59,6 +89,7 @@ func (s *SettingsService) GeneratePermanentToken(name, createdBy string) (string
 		Name:      name,
 		Token:     hashToken(tokenString), // the token itself is shown once, never stored
 		TokenHint: "..." + hint,
+		Scope:     scope,
 		CreatedBy: createdBy,
 		CreatedAt: time.Now(),
 	}

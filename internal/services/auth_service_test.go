@@ -216,7 +216,7 @@ func TestPermanentTokens_StoredOnlyAsAHash(t *testing.T) {
 	svc := newAuthTestService(t)
 	settings := NewSettingsService(svc.db, svc, svc.GetJWTSecret())
 
-	token, pt, err := settings.GeneratePermanentToken("ci", "u1")
+	token, pt, err := settings.GeneratePermanentToken("ci", "u1", ScopeAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,5 +252,74 @@ func TestPermanentTokens_OldPlainOnesAreHashedAndKeepWorking(t *testing.T) {
 	}
 	if _, err := svc.ValidateToken(tokenString, testOpts.Client); err != nil {
 		t.Fatalf("an existing permanent token stopped working: %v", err)
+	}
+}
+
+func TestCapRole(t *testing.T) {
+	cases := []struct{ role, scope, want string }{
+		{models.RoleAdmin, ScopeRead, models.RoleViewer},
+		{models.RoleAdmin, ScopeOperate, models.RoleOperator},
+		{models.RoleAdmin, ScopeAdmin, models.RoleAdmin},
+		{models.RoleOperator, ScopeRead, models.RoleViewer},
+		{models.RoleOperator, ScopeAdmin, models.RoleOperator}, // a scope never raises a role
+		{models.RoleViewer, ScopeOperate, models.RoleViewer},
+		{models.RoleAdmin, "", models.RoleAdmin}, // tokens from before scopes
+	}
+	for _, c := range cases {
+		if got := CapRole(c.role, c.scope); got != c.want {
+			t.Errorf("CapRole(%s, %q) = %s, want %s", c.role, c.scope, got, c.want)
+		}
+	}
+}
+
+func TestPermanentToken_ScopeLowersTheOwnersRole(t *testing.T) {
+	svc := newAuthTestService(t)
+	settings := NewSettingsService(svc.db, svc, svc.GetJWTSecret())
+	want := map[string]string{ScopeRead: models.RoleViewer, ScopeOperate: models.RoleOperator, ScopeAdmin: models.RoleAdmin}
+	for scope, role := range want {
+		tok, pt, err := settings.GeneratePermanentToken("t-"+scope, "u1", scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pt.Scope != scope {
+			t.Errorf("stored scope = %q, want %q", pt.Scope, scope)
+		}
+		user, err := svc.ValidateToken(tok, testOpts.Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if user.Role != role {
+			t.Errorf("scope %s: role %s, want %s", scope, user.Role, role)
+		}
+	}
+	var owner models.User
+	svc.db.First(&owner, "id = ?", "u1")
+	if owner.Role != models.RoleAdmin {
+		t.Errorf("the owner's own role changed to %s", owner.Role)
+	}
+}
+
+func TestPermanentToken_TokenFromBeforeScopesKeepsFullAccess(t *testing.T) {
+	svc := newAuthTestService(t)
+	tok := newPermanentToken(t, svc.GetJWTSecret())
+	svc.db.Create(&models.PermanentToken{ID: "old", Name: "old", Token: hashToken(tok), CreatedBy: "u1"})
+	user, err := svc.ValidateToken(tok, testOpts.Client)
+	if err != nil || user.Role != models.RoleAdmin {
+		t.Fatalf("old token: role %v, err %v; want admin", user, err)
+	}
+}
+
+func TestGeneratePermanentToken_RejectsUnknownScope(t *testing.T) {
+	svc := newAuthTestService(t)
+	settings := NewSettingsService(svc.db, svc, svc.GetJWTSecret())
+	for _, scope := range []string{"", "root", "Read"} {
+		if _, _, err := settings.GeneratePermanentToken("x", "u1", scope); err == nil {
+			t.Errorf("scope %q was accepted", scope)
+		}
+	}
+	var n int64
+	svc.db.Model(&models.PermanentToken{}).Count(&n)
+	if n != 0 {
+		t.Errorf("%d token(s) stored for refused scopes", n)
 	}
 }
