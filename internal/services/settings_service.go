@@ -189,6 +189,10 @@ func (s *SettingsService) CreateUser(username, email, password, role string) (*m
 	if err != nil {
 		return nil, err
 	}
+	// Users deleted before DeleteUser removed rows for good are still in the
+	// table and hold their username and email in the unique indexes, which made
+	// creating a user with a deleted one's name fail. Clear those leftovers.
+	s.db.Unscoped().Where("deleted_at IS NOT NULL AND (username = ? OR email = ?)", username, email).Delete(&models.User{})
 	user := &models.User{
 		ID:        uuid.New().String(),
 		Username:  username,
@@ -238,7 +242,8 @@ func (s *SettingsService) DeleteUser(userID, requesterID string) error {
 	if userID == requesterID {
 		return errors.New("cannot delete your own account")
 	}
-	if err := s.db.Delete(&models.User{}, "id = ?", userID).Error; err != nil {
+	// Unscoped: a soft-deleted row would keep the username and email taken.
+	if err := s.db.Unscoped().Delete(&models.User{}, "id = ?", userID).Error; err != nil {
 		return err
 	}
 	s.db.Where("user_id = ?", userID).Delete(&models.Passkey{})

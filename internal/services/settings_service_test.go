@@ -42,3 +42,31 @@ func TestMasterNode_RejectsUnknownNode(t *testing.T) {
 		t.Fatal("expected setting an unknown node as master to fail")
 	}
 }
+
+func TestCreateUser_AfterDeletingSameName(t *testing.T) {
+	svc := newSettingsTestService(t)
+	if err := svc.db.AutoMigrate(&models.Session{}, &models.Passkey{}); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := svc.CreateUser("boss", "boss@example.com", "pw-boss-1", models.RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := svc.CreateUser("vic", "vic@example.com", "pw-vic-1", models.RoleViewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteUser(v.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateUser("vic", "vic@example.com", "pw-vic-2", models.RoleViewer); err != nil {
+		t.Fatalf("recreating a deleted user failed: %v", err)
+	}
+	// A row soft-deleted by an older version must not block the name either.
+	old := &models.User{ID: "old", Username: "zed", Email: "zed@example.com", Password: "x", Role: models.RoleViewer}
+	svc.db.Create(old)
+	svc.db.Delete(old)
+	if _, err := svc.CreateUser("zed", "zed@example.com", "pw-zed-1", models.RoleViewer); err != nil {
+		t.Fatalf("creating over a soft-deleted leftover failed: %v", err)
+	}
+}
