@@ -55,6 +55,7 @@ export default function ProjectsPage() {
     ports: '',
     env: '',
     status: '',
+    pinned: false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -105,6 +106,7 @@ export default function ProjectsPage() {
       ports: project.auto_port ? '' : project.ports?.join(', ') || '',
       env: envText(project),
       status: project.status,
+      pinned: Boolean(project.pinned),
     });
   };
 
@@ -120,6 +122,7 @@ export default function ProjectsPage() {
         node_id: editForm.node_id,
         image: editForm.image,
         status: editForm.status,
+        pinned: editForm.pinned,
       };
       // Only send ports and env when edited: changing them redeploys the app.
       const originalPorts = editingProject.auto_port ? '' : editingProject.ports?.join(', ') || '';
@@ -216,7 +219,10 @@ export default function ProjectsPage() {
                 {project.description && <p className="text-xs text-text-secondary mt-3">{project.description}</p>}
 
                 <dl className="mt-3 space-y-1.5 text-xs text-text-secondary">
-                  <Row icon={Server}>{node?.hostname || 'not running'}</Row>
+                  <Row icon={Server}>
+                    {node?.hostname || 'not running'}
+                    {project.pinned && <span className="text-text-muted"> (pinned)</span>}
+                  </Row>
                   <Row icon={Package}><span className="font-mono break-all">{project.image || '—'}</span></Row>
                   {project.ports && project.ports.length > 0 && (
                     <Row icon={Plug}>
@@ -297,7 +303,7 @@ export default function ProjectsPage() {
           ].map(({ label, key, help }) => (
             <Field key={key} label={label} help={help}>
               <input
-                value={editForm[key as keyof typeof editForm]}
+                value={editForm[key as Exclude<keyof typeof editForm, 'pinned'>]}
                 onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
                 className={inputClass}
               />
@@ -329,6 +335,20 @@ export default function ProjectsPage() {
               </select>
             </Field>
           </div>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[#f59e0b]"
+              checked={editForm.pinned}
+              onChange={e => setEditForm(f => ({ ...f, pinned: e.target.checked }))}
+            />
+            <span className="text-sm">
+              Stay on this node
+              <span className="block text-xs text-text-muted">
+                Failover and maintenance never move this app. If its node goes down, the app stays down until the node is back.
+              </span>
+            </span>
+          </label>
         </Modal>
       )}
 

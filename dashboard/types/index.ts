@@ -157,6 +157,8 @@ export interface Project {
   image: string;
   ports: string[];
   auto_port?: boolean;
+  // Stays on its node: failover and maintenance never move it elsewhere.
+  pinned?: boolean;
   // Values come back masked; sending a masked value back keeps it.
   env_vars?: { key: string; value: string }[] | null;
   uptime: number;
