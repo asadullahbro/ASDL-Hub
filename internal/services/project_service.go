@@ -250,9 +250,10 @@ func (s *ProjectService) CreateProject(c *gin.Context) {
 func (s *ProjectService) UpdateProject(c *gin.Context) {
 	id := c.Param("id")
 	var req struct {
-		Name         string          `json:"name"`
-		Description  string          `json:"description"`
-		Domain       string          `json:"domain"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		// nil keeps the current domain; "" removes it (the app is then only reachable on its node).
+		Domain       *string         `json:"domain"`
 		NodeID       string          `json:"node_id"`
 		Image        string          `json:"image"`
 		Ports        []string        `json:"ports"`
@@ -270,7 +271,11 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := models.ValidateProjectConfig(req.Name, req.Domain, req.Ports, req.EnvVars); err != nil {
+	newDomain := ""
+	if req.Domain != nil {
+		newDomain = *req.Domain
+	}
+	if err := models.ValidateProjectConfig(req.Name, newDomain, req.Ports, req.EnvVars); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -287,8 +292,8 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 	if req.Description != "" {
 		project.Description = req.Description
 	}
-	if req.Domain != "" {
-		project.Domain = req.Domain
+	if req.Domain != nil {
+		project.Domain = *req.Domain
 	}
 	if req.RoutePath != nil {
 		if err := models.ValidateRoutePath(*req.RoutePath); err != nil {

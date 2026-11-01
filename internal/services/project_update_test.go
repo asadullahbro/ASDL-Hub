@@ -175,3 +175,27 @@ func TestRoutePath_ValidatedAndUniquePerDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateProject_DomainIsKeptWhenOmittedAndClearedWhenEmpty(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Updates(map[string]interface{}{"node_id": "good", "domain": "api.example.com"})
+	svc := NewProjectService(db, NewDeployer(db))
+
+	updateProject(t, svc, `{"description":"unrelated"}`)
+	if got := loadProject(db).Domain; got != "api.example.com" {
+		t.Fatalf("leaving domain out must keep it, got %q", got)
+	}
+	updateProject(t, svc, `{"domain":"other.example.com"}`)
+	if got := loadProject(db).Domain; got != "other.example.com" {
+		t.Fatalf("a new domain replaces the old one, got %q", got)
+	}
+	updateProject(t, svc, `{"domain":""}`)
+	if got := loadProject(db).Domain; got != "" {
+		t.Fatalf("an empty domain removes it, got %q", got)
+	}
+	var jobs int64
+	db.Model(&models.Job{}).Count(&jobs)
+	if jobs != 0 {
+		t.Errorf("changing the domain only updates routes, it must not redeploy (got %d jobs)", jobs)
+	}
+}
