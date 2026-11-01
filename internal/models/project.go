@@ -27,7 +27,11 @@ type Project struct {
 	Ports        []string `gorm:"serializer:json" json:"ports"`
 	// AutoPort means the hub picks the node port; Ports then holds the
 	// mapping it last chose. Projects without explicit ports are auto.
-	AutoPort     bool           `gorm:"default:false" json:"auto_port"`
+	AutoPort bool `gorm:"default:false" json:"auto_port"`
+	// Pinned keeps the app on its node: failover and maintenance never move it
+	// elsewhere. If the node goes down the app stays down until the node is back.
+	// Moving it yourself (app set ... node=) still works.
+	Pinned       bool           `gorm:"default:false" json:"pinned"`
 	EnvVars      SecretEnvVars  `gorm:"type:text" json:"env_vars"`
 	Volumes      []string       `gorm:"serializer:json" json:"volumes"`
 	Uptime       int64          `json:"uptime"`

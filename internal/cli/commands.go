@@ -43,6 +43,7 @@ type project struct {
 	HealthStatus string    `json:"health_status"`
 	Image        string    `json:"image"`
 	Ports        []string  `json:"ports"`
+	Pinned       bool      `json:"pinned"`
 	LastDeployed time.Time `json:"last_deployed"`
 	EnvVars      []struct {
 		Key string `json:"key"`
@@ -371,7 +372,11 @@ func (e *env) app(c *client, name string) error {
 	w := e.table()
 	fmt.Fprintf(w, "App\t%s\n", p.Name)
 	fmt.Fprintf(w, "ID\t%s\n", p.ID)
-	fmt.Fprintf(w, "Node\t%s\n", orDash(names[p.NodeID]))
+	node := orDash(names[p.NodeID])
+	if p.Pinned {
+		node += " (pinned: never moved to another node)"
+	}
+	fmt.Fprintf(w, "Node\t%s\n", node)
 	fmt.Fprintf(w, "Status\t%s, %s\n", p.Status, e.health(p.HealthStatus))
 	fmt.Fprintf(w, "Address\t%s\n", appAddress(*p))
 	fmt.Fprintf(w, "Image\t%s\n", orDash(p.Image))

@@ -70,6 +70,11 @@ func (s *NodeOpsService) SetMaintenance(node *models.Node, on bool, by string) (
 	s.db.Where("node_id = ? AND image <> ''", node.ID).Find(&projects)
 	for i := range projects {
 		p := &projects[i]
+		if p.Pinned {
+			res.Stays = append(res.Stays, p.Name)
+			log.Printf("📌 %s stays on %s during maintenance: it is pinned to this node", p.Name, node.Hostname)
+			continue
+		}
 		var target models.Node
 		if err := s.db.Scopes(models.Available).Where("id <> ?", node.ID).
 			Order("health_score desc").First(&target).Error; err != nil {

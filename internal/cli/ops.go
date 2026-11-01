@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -412,14 +413,14 @@ func applyEnvChanges(lines []string, changes map[string]*string) []string {
 
 // --- App settings ---
 
-// app set <app> domain=... path=... image=... description=... ports=8080:80,...
+// app set <app> domain=... path=... image=... description=... ports=8080:80,... node=... pinned=true|false
 func (e *env) appSet(c *client, name string, pairs []string) error {
 	p, err := c.findApp(name)
 	if err != nil {
 		return err
 	}
 	if len(pairs) == 0 {
-		return usageError{"expected asdl-hub app set <app> key=value ... (domain, path, image, description, ports)"}
+		return usageError{"expected asdl-hub app set <app> key=value ... (domain, path, image, description, ports, node, pinned)"}
 	}
 	body := map[string]interface{}{}
 	for _, kv := range pairs {
@@ -449,8 +450,14 @@ func (e *env) appSet(c *client, name string, pairs []string) error {
 				return err
 			}
 			body["node_id"] = n.ID
+		case "pinned":
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return usageError{"pinned must be true or false"}
+			}
+			body["pinned"] = b
 		default:
-			return usageError{fmt.Sprintf("unknown setting %q (domain, path, image, description, ports, node)", k)}
+			return usageError{fmt.Sprintf("unknown setting %q (domain, path, image, description, ports, node, pinned)", k)}
 		}
 	}
 	if err := c.do("PUT", "/projects/"+p.ID, body, nil); err != nil {

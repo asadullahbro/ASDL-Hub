@@ -386,6 +386,18 @@ func (s *HealthService) handleUnhealthyProject(project *models.Project) {
 		return
 	}
 
+	if project.Pinned {
+		// Never moved to another node: start it again on its own node if that is up, otherwise wait for the node
+		if s.restartInPlace(project, image) {
+			return
+		}
+		node := s.nodeName(project.NodeID)
+		log.Printf("📌 %s is pinned to %s and not answering; not failing over", project.Name, node)
+		s.announceDown(project, fmt.Sprintf("and it is pinned to %s, so it stays down until %s is back or it recovers.", node, node))
+		s.markFailed(project)
+		return
+	}
+
 	target := s.failoverTarget(project)
 	if target == nil {
 		// Nowhere else to go: if its own node is up, the container probably crashed, so start it again there

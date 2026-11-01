@@ -262,6 +262,8 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 		HealthStatus string          `json:"health_status"`
 		// nil keeps the current path; "" serves the whole domain.
 		RoutePath *string `json:"route_path"`
+		// nil keeps the current setting.
+		Pinned *bool `json:"pinned"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -319,6 +321,9 @@ func (s *ProjectService) UpdateProject(c *gin.Context) {
 		} else {
 			moveTo = &node
 		}
+	}
+	if req.Pinned != nil {
+		project.Pinned = *req.Pinned
 	}
 	if req.Image != "" {
 		project.Image = req.Image
