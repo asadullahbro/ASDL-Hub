@@ -40,20 +40,74 @@ func (s *MigrationService) StartMigrationSweeper() {
 	}()
 }
 
-// A migration is stuck if its target hasn't picked the job up within a
-// minute (it is probably down too) or hasn't finished within 5 minutes.
-// Failing it lets the health checker try the next node.
+// How long a migration may take before it is given up on, so the health checker can try the next node.
+const (
+	// unclaimedOnQuietNode: the target hasn't picked the job up and hasn't sent a heartbeat lately either, so it
+	// is probably down too.
+	unclaimedOnQuietNode = time.Minute
+	// unclaimedOnLiveNode: the target is up but still busy with jobs queued before this one (several apps
+	// failing over to it at once run one after another). Give it time to get through the queue.
+	unclaimedOnLiveNode = 10 * time.Minute
+	// migrationRunLimit: the target has started the job but not finished it.
+	migrationRunLimit = 5 * time.Minute
+)
+
+// migrationStuck reports whether a running migration should be given up on, and why. job and target are nil
+// when they no longer exist.
+func migrationStuck(m *models.Migration, job *models.Job, target *models.Node, now time.Time) (bool, string) {
+	age := now.Sub(m.CreatedAt)
+	if job == nil {
+		return age > migrationRunLimit, "no job"
+	}
+	switch job.Status {
+	case models.JobStatusPending:
+		live := target != nil && target.Online && now.Sub(target.LastHeartbeat) <= heartbeatTimeout
+		if !live {
+			return age > unclaimedOnQuietNode, "target is not answering"
+		}
+		return age > unclaimedOnLiveNode, "target never got to it"
+	case models.JobStatusRunning:
+		started := job.CreatedAt
+		if job.StartedAt != nil {
+			started = *job.StartedAt
+		}
+		return now.Sub(started) > migrationRunLimit, "target did not finish it"
+	default:
+		// The job ended without its completion reaching the migration (failed as stuck, cancelled).
+		return job.Status != models.JobStatusCompleted || age > migrationRunLimit, "job " + job.Status
+	}
+}
+
+// cleanupStuckMigrations fails migrations that migrationStuck gives up on, which lets the health checker try
+// the next node.
 func (s *MigrationService) cleanupStuckMigrations() {
+	var running []models.Migration
+	s.db.Where("status = ? AND created_at < ?", models.MigrationStatusRunning,
+		time.Now().Add(-unclaimedOnQuietNode)).Find(&running)
+
+	now := time.Now()
 	var migrations []models.Migration
-	s.db.Where("status = ?", models.MigrationStatusRunning).
-		Where("created_at < ? OR (created_at < ? AND job_id IN (?))",
-			time.Now().Add(-5*time.Minute),
-			time.Now().Add(-time.Minute),
-			s.db.Model(&models.Job{}).Select("id").Where("status = ?", models.JobStatusPending)).
-		Find(&migrations)
+	for i := range running {
+		m := &running[i]
+		var job *models.Job
+		if m.JobID != "" {
+			var j models.Job
+			if s.db.First(&j, "id = ?", m.JobID).Error == nil {
+				job = &j
+			}
+		}
+		var target *models.Node
+		var n models.Node
+		if s.db.First(&n, "id = ?", m.TargetNodeID).Error == nil {
+			target = &n
+		}
+		if stuck, why := migrationStuck(m, job, target, now); stuck {
+			log.Printf("⚠️ Found stuck migration: %s (created: %v, %s)", m.ID, m.CreatedAt, why)
+			migrations = append(migrations, *m)
+		}
+	}
 
 	for _, migration := range migrations {
-		log.Printf("⚠️ Found stuck migration: %s (created: %v)", migration.ID, migration.CreatedAt)
 		migration.Status = models.MigrationStatusFailed
 		s.db.Save(&migration)
 		// If the target never picked the job up, make sure it doesn't start

@@ -210,6 +210,7 @@ func (s *HealthService) recoverFailed() {
 	for i := range projects {
 		project := &projects[i]
 		if !recoveryReached(s.recovering, project.ID, s.checkProjectHealth(project)) {
+			s.retryFailover(project)
 			continue
 		}
 		log.Printf("✅ Project %s answers again, putting it back in service", project.Name)
@@ -217,16 +218,69 @@ func (s *HealthService) recoverFailed() {
 		if err := s.nginxService.UpdateNginxConfig(); err != nil {
 			log.Printf("⚠️ Failed to update Nginx config: %v", err)
 		}
-		node := s.nodeName(project.NodeID)
+		since, wasDown := s.down[project.ID]
 		delete(s.down, project.ID)
 		closeAppOutage(s.db, project.ID, time.Now())
-		notify(Event{
-			Type: EventAppRecovered, Level: LevelSuccess,
-			Title:   project.Name + " is back up",
-			Message: fmt.Sprintf("%s was marked failed but answers again on %s, so it is back in service.", project.Name, node),
-			URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
-		})
+		notify(s.recoveredEvent(project, since, wasDown, true))
 	}
+}
+
+// recoveredEvent is the "back up" notification. When the project was moved to another node during the outage it
+// says so (failed over from A to B) rather than only that it answers again on B, which reads as if it never left.
+func (s *HealthService) recoveredEvent(project *models.Project, since time.Time, known, wasFailed bool) Event {
+	node := s.nodeName(project.NodeID)
+	ev := Event{
+		Type: EventAppRecovered, Level: LevelSuccess,
+		Title: project.Name + " is back up",
+		URL:   link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
+	}
+	down := ""
+	if known {
+		down = fmt.Sprintf(", after %s down", time.Since(since).Round(time.Second))
+	}
+
+	var moved models.Migration
+	q := s.db.Where("project_id = ? AND status = ? AND target_node_id = ?", project.ID, models.MigrationStatusCompleted, project.NodeID)
+	if known {
+		q = q.Where("created_at >= ?", since)
+	} else {
+		q = q.Where("created_at >= ?", time.Now().Add(-24*time.Hour))
+	}
+	if q.Order("created_at DESC").First(&moved).Error == nil && moved.SourceNodeID != project.NodeID {
+		from := s.nodeName(moved.SourceNodeID)
+		ev.Title = fmt.Sprintf("%s failed over to %s", project.Name, node)
+		ev.Message = fmt.Sprintf("%s stopped answering on %s, so it was moved to %s and answers there now%s.", project.Name, from, node, down)
+		return ev
+	}
+	if wasFailed {
+		ev.Message = fmt.Sprintf("%s was marked failed but answers again on %s%s, so it is back in service.", project.Name, node, down)
+	} else {
+		ev.Message = fmt.Sprintf("%s answers again on %s%s.", project.Name, node, down)
+	}
+	return ev
+}
+
+// retryFailover tries again to move a failed project whose node is still down, once some node can take it:
+// one that was busy or in cooldown before, or one that has come online since. Without this a failed project
+// stays down until its own node returns, however long that is.
+func (s *HealthService) retryFailover(project *models.Project) {
+	if project.Pinned {
+		return
+	}
+	var node models.Node
+	if s.db.First(&node, "id = ?", project.NodeID).Error == nil && node.Online {
+		return // its node is up; recovery or an in-place restart is the way back
+	}
+	var active int64
+	s.db.Model(&models.Migration{}).
+		Where("project_id = ? AND status IN ?", project.ID,
+			[]string{models.MigrationStatusPending, models.MigrationStatusRunning}).
+		Count(&active)
+	if active > 0 || s.failoverTarget(project) == nil {
+		return
+	}
+	log.Printf("🔁 %s is still down and a node can take it now, trying failover again", project.Name)
+	s.handleUnhealthyProject(project)
 }
 
 func (s *HealthService) checkAllProjects() {
@@ -278,13 +332,7 @@ func (s *HealthService) checkAllProjects() {
 			if since, ok := s.down[project.ID]; ok {
 				delete(s.down, project.ID)
 				closeAppOutage(s.db, project.ID, time.Now())
-				node := s.nodeName(project.NodeID)
-				notify(Event{
-					Type: EventAppRecovered, Level: LevelSuccess,
-					Title:   project.Name + " is back up",
-					Message: fmt.Sprintf("%s answers again on %s, after %s down.", project.Name, node, time.Since(since).Round(time.Second)),
-					URL:     link("/projects"), ProjectID: project.ID, Project: project.Name, Node: node,
-				})
+				notify(s.recoveredEvent(&project, since, true, false))
 			}
 			continue
 		}

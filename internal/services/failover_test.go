@@ -119,6 +119,130 @@ func TestProjectEnv_StoredEncrypted(t *testing.T) {
 	}
 }
 
+// Several apps failing over to one node at once queue there and run one after another. The ones further back
+// must not be given up on after a minute just because the node is still busy with the first: that once put the
+// only healthy node in cooldown and left two apps down for half an hour.
+func TestStuckMigration_LiveTargetWorkingThroughAQueueIsNotStuck(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	ms := NewMigrationService(db, nil, nil, NewDeployer(db))
+	now := time.Now()
+	db.Model(&models.Node{}).Where("id = ?", "good").Update("last_heartbeat", now.Add(-10*time.Second))
+	waited := now.Add(-90 * time.Second)
+	db.Create(&models.Job{ID: "queued", NodeID: "good", Type: models.JobTypeDeploy, Status: models.JobStatusPending, CreatedAt: waited})
+	db.Create(&models.Migration{ID: "m1", ProjectID: "p1", ContainerID: "c", SourceNodeID: "dead", TargetNodeID: "good",
+		Status: models.MigrationStatusRunning, JobID: "queued", CreatedAt: waited})
+
+	ms.cleanupStuckMigrations()
+
+	var m models.Migration
+	db.First(&m, "id = ?", "m1")
+	var j models.Job
+	db.First(&j, "id = ?", "queued")
+	if m.Status != models.MigrationStatusRunning || j.Status != models.JobStatusPending {
+		t.Fatalf("queued behind other jobs on a live node: migration %q job %q, want running/pending", m.Status, j.Status)
+	}
+
+	// A queue that never moves is still given up on eventually.
+	long := now.Add(-11 * time.Minute)
+	db.Model(&models.Migration{}).Where("id = ?", "m1").Update("created_at", long)
+	ms.cleanupStuckMigrations()
+	db.First(&m, "id = ?", "m1")
+	if m.Status != models.MigrationStatusFailed {
+		t.Errorf("unclaimed for 11 minutes on a live node: migration %q, want failed", m.Status)
+	}
+}
+
+func TestMigrationStuck(t *testing.T) {
+	now := time.Now()
+	live := &models.Node{Online: true, LastHeartbeat: now.Add(-5 * time.Second)}
+	quiet := &models.Node{Online: true, LastHeartbeat: now.Add(-3 * time.Minute)}
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+	started := ago(6 * time.Minute)
+	cases := []struct {
+		name   string
+		mAge   time.Duration
+		job    *models.Job
+		target *models.Node
+		want   bool
+	}{
+		{"pending on live node, 2m", 2 * time.Minute, &models.Job{Status: models.JobStatusPending}, live, false},
+		{"pending on quiet node, 2m", 2 * time.Minute, &models.Job{Status: models.JobStatusPending}, quiet, true},
+		{"pending, target gone", 2 * time.Minute, &models.Job{Status: models.JobStatusPending}, nil, true},
+		{"running, started 6m ago", 7 * time.Minute, &models.Job{Status: models.JobStatusRunning, StartedAt: &started}, live, true},
+		{"running, started just now after a long queue", 8 * time.Minute, &models.Job{Status: models.JobStatusRunning, StartedAt: func() *time.Time { t := ago(30 * time.Second); return &t }()}, live, false},
+		{"job failed", 2 * time.Minute, &models.Job{Status: models.JobStatusFailed}, live, true},
+		{"no job, 6m", 6 * time.Minute, nil, live, true},
+	}
+	for _, c := range cases {
+		got, _ := migrationStuck(&models.Migration{CreatedAt: ago(c.mAge)}, c.job, c.target, now)
+		if got != c.want {
+			t.Errorf("%s: stuck = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A project marked failed because no node could take it is moved as soon as one can, instead of staying down
+// until its own node returns.
+func TestRecoverFailed_RetriesFailoverWhenANodeCanTakeIt(t *testing.T) {
+	hs, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Updates(map[string]interface{}{"status": "failed", "health_status": "unhealthy"})
+
+	hs.recoverFailed()
+
+	var job models.Job
+	if err := db.First(&job, "type = ?", models.JobTypeDeploy).Error; err != nil {
+		t.Fatalf("expected a failover deploy for the failed project: %v", err)
+	}
+	if job.NodeID != "good" {
+		t.Errorf("retry went to %s, want good", job.NodeID)
+	}
+
+	// While that move is running, later rounds don't queue another.
+	hs.recoverFailed()
+	var n int64
+	db.Model(&models.Job{}).Where("type = ?", models.JobTypeDeploy).Count(&n)
+	if n != 1 {
+		t.Errorf("deploy jobs = %d, want 1", n)
+	}
+}
+
+func TestRecoverFailed_PinnedProjectIsNotMoved(t *testing.T) {
+	hs, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Updates(map[string]interface{}{"status": "failed", "pinned": true})
+
+	hs.recoverFailed()
+
+	var n int64
+	db.Model(&models.Job{}).Where("type = ?", models.JobTypeDeploy).Count(&n)
+	if n != 0 {
+		t.Errorf("a pinned project was moved (%d deploy jobs)", n)
+	}
+}
+
+// "answers again on good" after a failover reads as if the app never left; say it failed over, and from where.
+func TestRecoveredEvent_SaysFailedOverWhenMoved(t *testing.T) {
+	hs, _, db := newFailoverEnv(t)
+	since := time.Now().Add(-2 * time.Minute)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Update("node_id", "good")
+	db.Create(&models.Migration{ID: "m", ProjectID: "p1", ContainerID: "c", SourceNodeID: "dead", TargetNodeID: "good",
+		Status: models.MigrationStatusCompleted, CreatedAt: since.Add(30 * time.Second)})
+	p := loadProject(db)
+
+	ev := hs.recoveredEvent(&p, since, true, false)
+	if ev.Title != "api failed over to good" {
+		t.Errorf("title = %q", ev.Title)
+	}
+	if !strings.Contains(ev.Message, "stopped answering on dead, so it was moved to good") || !strings.Contains(ev.Message, "down") {
+		t.Errorf("message = %q", ev.Message)
+	}
+
+	// A move from before this outage is not this outage's story.
+	ev = hs.recoveredEvent(&p, since.Add(time.Minute), true, false)
+	if ev.Title != "api is back up" || !strings.HasPrefix(ev.Message, "api answers again on good") {
+		t.Errorf("no move in this outage: %q / %q", ev.Title, ev.Message)
+	}
+}
+
 func TestStuckMigration_UnclaimedJobGivesUpAfterAMinute(t *testing.T) {
 	_, _, db := newFailoverEnv(t)
 	ms := NewMigrationService(db, nil, nil, NewDeployer(db))
