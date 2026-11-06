@@ -142,6 +142,10 @@ func (s *MigrationService) MigrateToNode(projectID, targetNodeID string) {
 		log.Printf("⚠️ MigrateToNode: target node %s not found", targetNodeID)
 		return
 	}
+	if port := fixedPortClash(s.db, &targetNode, &project); port != 0 {
+		log.Printf("⚠️ MigrateToNode: not moving %s to %s, its fixed port %d is taken there", project.Name, targetNode.Hostname, port)
+		return
+	}
 
 	// Check for active migration
 	var existing models.Migration
@@ -267,6 +271,13 @@ func (s *MigrationService) MigrateProject(c *gin.Context) {
 
 	if sourceNode.ID == targetNode.ID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "source and target nodes are the same"})
+		return
+	}
+
+	if port := fixedPortClash(s.db, &targetNode, &project); port != 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
+			"port %d is already taken on %s, and %s is set to that fixed port; pick another node or switch %s to automatic ports",
+			port, targetNode.Hostname, project.Name, project.Name)})
 		return
 	}
 

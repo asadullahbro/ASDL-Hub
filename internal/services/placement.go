@@ -3,7 +3,10 @@ package services
 import (
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +23,62 @@ const (
 	// A node that went quiet in the last day scores this much lower for each outage: it is flapping.
 	recentOutagePenalty = 15.0
 )
+
+// publishedPortRe finds the host port in Docker's port text, e.g. "0.0.0.0:20005->3000/tcp".
+var publishedPortRe = regexp.MustCompile(`:(\d+)->`)
+
+// ownsContainer reports whether c is one of project's containers (the app or a plugin beside it), which a deploy
+// of the project replaces rather than clashes with.
+func ownsContainer(c models.NodeContainer, project *models.Project) bool {
+	if c.ProjectID != "" {
+		return c.ProjectID == project.ID
+	}
+	return c.Name == project.Name || strings.HasPrefix(c.Name, project.Name+"-")
+}
+
+// usedHostPorts is every host port on node that something other than project holds: ports the Hub has given
+// other apps there, and ports the node's agent reports published, which also covers containers the Hub did not
+// start.
+func usedHostPorts(db *gorm.DB, node *models.Node, project *models.Project) map[int]bool {
+	used := make(map[int]bool)
+	var others []models.Project
+	db.Where("node_id = ? AND id != ?", node.ID, project.ID).Find(&others)
+	for _, o := range others {
+		for _, m := range o.Ports {
+			if host, _, err := models.ParsePortMapping(m); err == nil {
+				n, _ := strconv.Atoi(host)
+				used[n] = true
+			}
+		}
+	}
+	for _, c := range node.Containers {
+		if ownsContainer(c, project) {
+			continue
+		}
+		for _, m := range publishedPortRe.FindAllStringSubmatch(c.Ports, -1) {
+			n, _ := strconv.Atoi(m[1])
+			used[n] = true
+		}
+	}
+	return used
+}
+
+// fixedPortClash returns the first of project's fixed host ports that is already taken on node, or 0. Apps on
+// automatic ports never clash: the Hub and the agent pick them a free one.
+func fixedPortClash(db *gorm.DB, node *models.Node, project *models.Project) int {
+	if project.AutoPort || len(project.Ports) == 0 {
+		return 0
+	}
+	used := usedHostPorts(db, node, project)
+	for _, m := range project.Ports {
+		if host, _, err := models.ParsePortMapping(m); err == nil {
+			if n, _ := strconv.Atoi(host); used[n] {
+				return n
+			}
+		}
+	}
+	return 0
+}
 
 // placementCandidate is what the ranking knows about a node that could take an app.
 type placementCandidate struct {
@@ -76,7 +135,8 @@ func rankPlacements(cands []placementCandidate) []placementCandidate {
 }
 
 // placementCandidates gathers the nodes that could take the project (online, not in maintenance, not the one it
-// is on, and not one a failover to just failed on), with the facts the ranking needs.
+// is on, not one a failover to just failed on, and not one where its fixed port is taken), with the facts the
+// ranking needs.
 func placementCandidates(db *gorm.DB, project *models.Project, excluded []string, now time.Time) []placementCandidate {
 	q := db.Scopes(models.Available).Where("id != ?", project.NodeID)
 	if len(excluded) > 0 {
@@ -92,6 +152,9 @@ func placementCandidates(db *gorm.DB, project *models.Project, excluded []string
 
 	cands := make([]placementCandidate, 0, len(nodes))
 	for i := range nodes {
+		if port := fixedPortClash(db, &nodes[i], project); port != 0 {
+			continue // its docker run would fail: "port is already allocated"
+		}
 		c := placementCandidate{Node: nodes[i], Uptime7d: -1, IsMaster: hasMaster && nodes[i].ID == master.Value}
 		if u := uptimeOf(db, &nodes[i], now, since); u.Uptime7d != nil {
 			c.Uptime7d = *u.Uptime7d

@@ -268,3 +268,59 @@ func TestStuckMigration_UnclaimedJobGivesUpAfterAMinute(t *testing.T) {
 		t.Errorf("a job the target is running gets 5 minutes, migration = %q", m2.Status)
 	}
 }
+
+// ai-chat on fixed port 20005 failed over to a node where modscore already held 20005: docker refused with
+// "port is already allocated". A node where a fixed port is taken is not a candidate.
+func TestFailover_SkipsNodeWhereFixedPortIsTaken(t *testing.T) {
+	hs, _, db := newFailoverEnv(t)
+	db.Model(&models.Project{}).Where("id = ?", "p1").Select("ports", "auto_port").
+		Updates(&models.Project{Ports: []string{"20005:3000"}, AutoPort: false})
+	db.Create(&models.Project{ID: "p2", Name: "modscore", NodeID: "good", Status: "running", Ports: []string{"20005:8000"}})
+
+	p := loadProject(db)
+	hs.handleUnhealthyProject(&p)
+
+	var job models.Job
+	if err := db.First(&job, "type = ?", models.JobTypeDeploy).Error; err != nil {
+		t.Fatalf("expected a failover deploy: %v", err)
+	}
+	if job.NodeID != "ok" {
+		t.Errorf("failover went to %s, where port 20005 is taken; want ok", job.NodeID)
+	}
+}
+
+func TestFixedPortClash(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	project := &models.Project{ID: "p1", Name: "ai-chat", Ports: []string{"20005:3000"}}
+	now := time.Now()
+	node := &models.Node{ID: "good", LastHeartbeat: now, Containers: []models.NodeContainer{
+		{Name: "ai-chat", Ports: "0.0.0.0:20005->3000/tcp"},                      // its own old copy: a deploy replaces it
+		{Name: "ai-chat-redis", Ports: "0.0.0.0:20006->6379/tcp"},                // its own plugin
+		{Name: "postgres", Ports: "0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp"}, // not the Hub's
+	}}
+	if p := fixedPortClash(db, node, project); p != 0 {
+		t.Errorf("own containers count as a clash: %d", p)
+	}
+
+	project.Ports = []string{"5432:5432"}
+	if p := fixedPortClash(db, node, project); p != 5432 {
+		t.Errorf("a container the Hub didn't start holds 5432, clash = %d", p)
+	}
+
+	project.AutoPort = true
+	if p := fixedPortClash(db, node, project); p != 0 {
+		t.Errorf("an app on automatic ports never clashes, got %d", p)
+	}
+}
+
+// Automatic ports also step over ports the agent reports taken, not only those in the Hub's records.
+func TestPreferredHostPort_SkipsPortsTheAgentReports(t *testing.T) {
+	_, _, db := newFailoverEnv(t)
+	db.Model(&models.Node{}).Where("id = ?", "good").Select("containers").Updates(&models.Node{Containers: []models.NodeContainer{
+		{Name: "something", Ports: "0.0.0.0:20000->80/tcp"},
+	}})
+	p := loadProject(db)
+	if got := NewDeployer(db).preferredHostPort(&p, "good"); got != 20001 {
+		t.Errorf("preferred port = %d, want 20001 (20000 is reported taken)", got)
+	}
+}

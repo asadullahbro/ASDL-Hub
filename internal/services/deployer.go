@@ -117,17 +117,9 @@ func (d *Deployer) Dispatch(project *models.Project, node *models.Node, image st
 // node, and otherwise picks the lowest port no other project on the node uses.
 // The node still checks the port is free and moves up if it isn't.
 func (d *Deployer) preferredHostPort(project *models.Project, nodeID string) int {
-	var others []models.Project
-	d.db.Where("node_id = ? AND id != ?", nodeID, project.ID).Find(&others)
-	used := make(map[int]bool)
-	for _, o := range others {
-		for _, m := range o.Ports {
-			if host, _, err := models.ParsePortMapping(m); err == nil {
-				n, _ := strconv.Atoi(host)
-				used[n] = true
-			}
-		}
-	}
+	node := models.Node{ID: nodeID}
+	d.db.First(&node, "id = ?", nodeID) // without it only the Hub's own records count
+	used := usedHostPorts(d.db, &node, project)
 
 	if project.NodeID == nodeID && len(project.Ports) > 0 {
 		if host, _, err := models.ParsePortMapping(project.Ports[0]); err == nil {
