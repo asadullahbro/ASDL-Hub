@@ -200,7 +200,7 @@ func newSnapshotJob(db *gorm.DB, project *models.Project, nodeID string, pl Reso
 	script, env := BuildSnapshotCommand(pl, trigger, id)
 	job := &models.Job{
 		ID: id, NodeID: nodeID, Type: models.JobTypeCommand, Status: models.JobStatusPending,
-		Command: script, Environment: env, Timeout: 600, MaxRetries: 0, CreatedAt: time.Now(),
+		Command: script, Environment: env, Timeout: 600, MaxRetries: 0, CreatedAt: time.Now(), Scope: models.AppScope(project.ID),
 		Payload: &models.JobPayload{Operation: snapshotJobMarker, ContainerName: pl.ContainerName},
 	}
 	if err := db.Create(job).Error; err != nil {

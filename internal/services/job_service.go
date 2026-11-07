@@ -93,24 +93,86 @@ func (s *JobService) Claim(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
-	node := *found
-
-	var job models.Job
-	err = s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).
-		Order("created_at ASC").
-		First(&job).Error
-
-	if err != nil {
+	job := s.nextJob(found, time.Now())
+	if job == nil {
 		c.JSON(http.StatusNoContent, nil)
 		return
 	}
-
-	job.Status = models.JobStatusRunning
-	now := time.Now()
-	job.StartedAt = &now
-	s.db.Save(&job)
-
 	c.JSON(http.StatusOK, job)
+}
+
+// parallelJobMinFreeMemory is how much memory a node must have free (by its last heartbeat) for a job to start
+// beside ones already running. The first job always starts.
+const parallelJobMinFreeMemory = 1536 << 20
+
+// roomForAnotherJob reports whether node has the resources to start a job beside the ones it is running: enough
+// free memory, and a load below its core count. What the node hasn't reported doesn't hold a job back.
+func roomForAnotherJob(node *models.Node) bool {
+	if node.MemoryTotal > 0 && node.MemoryTotal-node.MemoryUsed < parallelJobMinFreeMemory {
+		return false
+	}
+	if node.CPU > 0 && node.LoadAvg1 >= float64(node.CPU) {
+		return false
+	}
+	return true
+}
+
+// nextJob claims the oldest pending job on node that may start now, or returns nil. A node runs up to its
+// JobLimit jobs at once; jobs on the same scope (one app) never overlap, and a job without a scope only starts
+// on an idle node and keeps later jobs from overtaking it. Live log streams run beside everything, as before.
+func (s *JobService) nextJob(node *models.Node, now time.Time) *models.Job {
+	var agentStarted time.Time // zero: count every running job
+	if node.AgentStartedAt != nil {
+		agentStarted = *node.AgentStartedAt
+	}
+	var running []models.Job
+	s.db.Select("id", "type", "scope").
+		Where("node_id = ? AND status = ? AND type <> ? AND (started_at IS NULL OR started_at >= ?)",
+			node.ID, models.JobStatusRunning, models.JobTypeLogsFollow, agentStarted).
+		Find(&running)
+	busy := make(map[string]bool, len(running))
+	for _, r := range running {
+		busy[r.Scope] = true
+	}
+	_, exclusive := busy[""]
+
+	var pending []models.Job
+	s.db.Where("node_id = ? AND status = ?", node.ID, models.JobStatusPending).
+		Order("created_at ASC").Limit(100).Find(&pending)
+
+	limit := node.JobLimit()
+	queueBlocked := false // a job ahead must start first, so only log streams may go
+	for i := range pending {
+		job := &pending[i]
+		if job.Type != models.JobTypeLogsFollow {
+			if queueBlocked || exclusive || len(running) >= limit {
+				continue
+			}
+			if len(running) > 0 {
+				if job.Scope == "" {
+					queueBlocked = true // it runs alone: wait for the node to be idle
+					continue
+				}
+				if busy[job.Scope] {
+					continue // that app already has a job running
+				}
+				if !roomForAnotherJob(node) {
+					queueBlocked = true
+					continue
+				}
+			}
+		}
+		// Claim it unless another request just did.
+		res := s.db.Model(&models.Job{}).Where("id = ? AND status = ?", job.ID, models.JobStatusPending).
+			Updates(map[string]interface{}{"status": models.JobStatusRunning, "started_at": now})
+		if res.Error != nil || res.RowsAffected == 0 {
+			continue
+		}
+		job.Status = models.JobStatusRunning
+		job.StartedAt = &now
+		return job
+	}
+	return nil
 }
 
 func (s *JobService) Complete(c *gin.Context) {
@@ -146,6 +208,14 @@ func (s *JobService) Complete(c *gin.Context) {
 	var node models.Node
 	if err := s.db.First(&node, "vpn_ip = ?", vpnIP).Error; err != nil || node.ID != job.NodeID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized"})
+		return
+	}
+
+	// Agents retry a report that didn't get through, so the same one can arrive twice (the first reached the
+	// Hub but its answer was lost). Acting on it again would announce the deploy twice and queue a second
+	// clean-up; a late report that changes the outcome (the Hub gave up on a job that then finished) still counts.
+	if job.CompletedAt != nil && job.Status == req.Status {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "duplicate": true})
 		return
 	}
 
@@ -308,6 +378,7 @@ func (s *JobService) completeDeploy(job *models.Job, now time.Time) {
 			Type:       models.JobTypeFailoverStop,
 			Status:     models.JobStatusPending,
 			Command:    BuildRemoveProjectCommand(&project),
+			Scope:      models.AppScope(project.ID),
 			MaxRetries: 2,
 			CreatedAt:  now,
 		}
@@ -336,6 +407,7 @@ func (s *JobService) removeStrayCopy(project *models.Project, dep *models.Deploy
 		Type:       models.JobTypeFailoverStop,
 		Status:     models.JobStatusPending,
 		Command:    BuildRemoveProjectCommand(project),
+		Scope:      models.AppScope(project.ID),
 		MaxRetries: 2,
 		CreatedAt:  now,
 	}
@@ -527,6 +599,7 @@ func (s *JobService) Retry(c *gin.Context) {
 		Environment: job.Environment,
 		Timeout:     job.Timeout,
 		MaxRetries:  job.MaxRetries,
+		Scope:       job.Scope,
 		CreatedAt:   time.Now(),
 	}
 
@@ -608,4 +681,18 @@ func (s *JobService) failStuckJobs(now time.Time) {
 			s.completeDeploy(j, now)
 		}
 	}
+}
+
+// JobsInFlight counts the jobs a Hub restart would disturb: queued or running on an online node. Live log streams
+// (someone watching, and they end by themselves) and jobs left running by an agent process that has since
+// restarted don't count; neither do jobs for offline nodes, which can't move until their node is back.
+func JobsInFlight(db *gorm.DB) int {
+	var n int64
+	db.Model(&models.Job{}).
+		Joins("JOIN nodes ON nodes.id = jobs.node_id AND nodes.online AND nodes.deleted_at IS NULL").
+		Where("jobs.type <> ?", models.JobTypeLogsFollow).
+		Where("jobs.status = ? OR (jobs.status = ? AND (jobs.started_at IS NULL OR nodes.agent_started_at IS NULL OR jobs.started_at >= nodes.agent_started_at))",
+			models.JobStatusPending, models.JobStatusRunning).
+		Count(&n)
+	return int(n)
 }

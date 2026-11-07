@@ -30,6 +30,7 @@ import { NodeConnection } from '@/components/nodes/NodeConnection';
 import { NodeOutages } from '@/components/nodes/NodeOutages';
 import { NodeMetrics } from '@/components/nodes/NodeMetrics';
 import { NodeMaintenance } from '@/components/nodes/NodeMaintenance';
+import { NodeParallelJobs } from '@/components/nodes/NodeParallelJobs';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -259,6 +260,8 @@ export default function NodeDetailPage() {
       </Card>
 
       <NodeMaintenance node={node} canEdit={canEdit} onChange={loadAll} />
+
+      <NodeParallelJobs node={node} canEdit={canEdit} onChange={loadAll} />
       <NodeConnection nodeId={node.id} />
       <NodeOutages nodeId={node.id} />
       <NodeMetrics nodeId={node.id} />

@@ -53,6 +53,8 @@ export interface SystemVersion {
   check_error: string;
   can_update: boolean;
   upgrading: string;
+  // Jobs the update is waiting on before it restarts the Hub.
+  waiting_for_jobs?: number;
 }
 
 export class ApiError extends Error {
@@ -211,6 +213,12 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
+  setNodeParallelJobs: (id: string, parallelJobs: number): Promise<{ parallel_jobs: number }> =>
+    request<{ parallel_jobs: number }>(`/nodes/${id}/parallel-jobs`, {
+      method: 'PUT',
+      body: JSON.stringify({ parallel_jobs: parallelJobs }),
+    }),
+
   // Both return a job; follow it with getJob / getJobLogs.
   requestContainerLogs: (nodeId: string, name: string, lines = 200): Promise<{ job_id: string }> =>
     request<{ job_id: string }>(`/nodes/${nodeId}/containers/${encodeURIComponent(name)}/logs?lines=${lines}`, { method: 'POST' }),
@@ -218,8 +226,8 @@ export const api = {
   restartNodeContainer: (nodeId: string, name: string): Promise<{ job_id: string }> =>
     request<{ job_id: string }>(`/nodes/${nodeId}/containers/${encodeURIComponent(name)}/restart`, { method: 'POST' }),
 
-  startSystemUpdate: (): Promise<{ upgrading: string }> =>
-    request<{ upgrading: string }>('/system/update', { method: 'POST' }),
+  startSystemUpdate: (): Promise<{ upgrading: string; waiting_for_jobs?: number }> =>
+    request<{ upgrading: string; waiting_for_jobs?: number }>('/system/update', { method: 'POST' }),
 
   // Auth
   // remember: stay signed in for 30 days instead of one.

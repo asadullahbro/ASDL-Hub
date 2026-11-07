@@ -40,8 +40,31 @@ type UpdateService struct {
 	url       string
 	checkedAt time.Time
 	checkErr  string
-	upgrading string // target version while an upgrade is running
+	upgrading string // target version while an upgrade is running (or waiting to start)
 	announced string // the release last announced to notification channels
+	// waitingFor is how many jobs the upgrade is waiting on before it restarts the Hub; 0 once it has started.
+	waitingFor int
+
+	inFlight func() int // jobs on online nodes that are queued or running; nil counts none
+}
+
+// upgradeWaitLimit is the longest an update waits for jobs to finish before going ahead anyway, so one stuck job
+// can't hold back updates for good.
+const upgradeWaitLimit = 30 * time.Minute
+
+// upgradeWaitPoll is how often a waiting update checks the jobs again.
+var upgradeWaitPoll = 15 * time.Second
+
+// SetInFlightJobs tells the update service how to count the jobs an upgrade should wait for. While the Hub
+// restarts, agents can't claim jobs or report finished ones, and a report that doesn't get through leaves the
+// Hub thinking the job never ended.
+func (s *UpdateService) SetInFlightJobs(count func() int) { s.inFlight = count }
+
+func (s *UpdateService) jobsInFlight() int {
+	if s.inFlight == nil {
+		return 0
+	}
+	return s.inFlight()
 }
 
 func NewUpdateService(current string) *UpdateService {
@@ -126,7 +149,8 @@ func newerVersion(a, b string) bool {
 	return false
 }
 
-func canSelfUpdate() bool {
+// canSelfUpdate reports whether the upgrade helper is installed (a variable so tests can stand in for it).
+var canSelfUpdate = func() bool {
 	info, err := os.Stat(UpgradeHelper)
 	return err == nil && !info.IsDir()
 }
@@ -148,10 +172,13 @@ func (s *UpdateService) Status(c *gin.Context) {
 		"check_error":      s.checkErr,
 		"can_update":       canSelfUpdate(),
 		"upgrading":        s.upgrading,
+		"waiting_for_jobs": s.waitingFor,
 	})
 }
 
-// Update handles POST /system/update: upgrade to the latest release.
+// Update handles POST /system/update: upgrade to the latest release. While jobs are queued or running on online
+// nodes it waits for them first (at most upgradeWaitLimit) and answers straight away with how many; ?now=1
+// upgrades without waiting.
 func (s *UpdateService) Update(c *gin.Context) {
 	s.mu.Lock()
 	target := s.latest
@@ -174,17 +201,56 @@ func (s *UpdateService) Update(c *gin.Context) {
 	s.upgrading = target
 	s.mu.Unlock()
 
-	// The helper hands the work to systemd and returns straight away, so it
-	// survives the installer restarting this process.
+	if n := s.jobsInFlight(); n > 0 && c.Query("now") != "1" {
+		s.mu.Lock()
+		s.waitingFor = n
+		s.mu.Unlock()
+		log.Printf("⏳ Updating ASDL Hub to %s once %d job(s) finish (at most %s)", target, n, upgradeWaitLimit)
+		go s.upgradeWhenIdle(target, time.Now().Add(upgradeWaitLimit))
+		c.JSON(http.StatusAccepted, gin.H{"upgrading": target, "waiting_for_jobs": n})
+		return
+	}
+
+	if err := s.startUpgrade(target); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"upgrading": target})
+}
+
+// upgradeWhenIdle starts the upgrade once no jobs are in flight, or at deadline.
+func (s *UpdateService) upgradeWhenIdle(target string, deadline time.Time) {
+	for {
+		n := s.jobsInFlight()
+		s.mu.Lock()
+		s.waitingFor = n
+		s.mu.Unlock()
+		if n == 0 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			log.Printf("⚠️ %d job(s) still running after %s; updating anyway", n, upgradeWaitLimit)
+			break
+		}
+		time.Sleep(upgradeWaitPoll)
+	}
+	s.startUpgrade(target)
+}
+
+// startUpgrade runs the upgrade helper. The helper hands the work to systemd and returns straight away, so it
+// survives the installer restarting this process.
+func (s *UpdateService) startUpgrade(target string) error {
+	s.mu.Lock()
+	s.waitingFor = 0
+	s.mu.Unlock()
 	out, err := exec.Command("sudo", "-n", UpgradeHelper, target).CombinedOutput()
 	if err != nil {
 		s.mu.Lock()
 		s.upgrading = ""
 		s.mu.Unlock()
 		log.Printf("❌ Could not start upgrade to %s: %v: %s", target, err, out)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("could not start the upgrade: %s", out)})
-		return
+		return fmt.Errorf("could not start the upgrade: %s", out)
 	}
 	log.Printf("⬆️ Upgrading ASDL Hub %s → %s (log: /var/log/asdl-hub-upgrade.log)", s.current, target)
-	c.JSON(http.StatusAccepted, gin.H{"upgrading": target})
+	return nil
 }

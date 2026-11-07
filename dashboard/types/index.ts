@@ -11,6 +11,9 @@ export interface Node {
   maintenance_by?: string;
   // What the node's agent last reported running.
   containers?: NodeContainer[] | null;
+  // How many jobs the node may run at once (1: one after another), and what its hardware suggests.
+  parallel_jobs?: number;
+  recommended_parallel_jobs?: number;
   cpu: number;
   cpu_cores?: number;
   memory_total: number;

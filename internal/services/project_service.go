@@ -498,6 +498,7 @@ func (s *ProjectService) DeleteProject(c *gin.Context) {
 			Type:       models.JobTypeFailoverStop,
 			Status:     models.JobStatusPending,
 			Command:    BuildRemoveProjectCommand(&project),
+			Scope:      models.AppScope(project.ID),
 			MaxRetries: 2,
 			CreatedAt:  time.Now(),
 		}

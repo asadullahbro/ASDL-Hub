@@ -77,6 +77,7 @@ func (d *Deployer) Dispatch(project *models.Project, node *models.Node, image st
 		Command:     command,
 		Environment: env,
 		MaxRetries:  1,
+		Scope:       models.AppScope(project.ID),
 		CreatedAt:   now,
 	}
 	if err := d.db.Create(job).Error; err != nil {

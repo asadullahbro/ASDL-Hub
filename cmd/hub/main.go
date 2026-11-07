@@ -210,6 +210,7 @@ For the command line, run: asdl-hub help
 	notificationService := services.NewNotificationService(database, cfg.Server.HubURL)
 
 	updateService := services.NewUpdateService(Version)
+	updateService.SetInFlightJobs(func() int { return services.JobsInFlight(database) })
 	updateService.Start()
 	log.Printf("ASDL Hub %s", Version)
 
@@ -659,6 +660,7 @@ echo "Agent updated successfully"
 			operator.POST("/containers/:id/start", containerService.StartContainer)
 			operator.POST("/containers/:id/restart", containerService.RestartContainer)
 			operator.PUT("/nodes/:id/maintenance", nodeOps.SetMaintenanceHandler)
+			operator.PUT("/nodes/:id/parallel-jobs", nodeOps.SetParallelJobs)
 			// Logs can contain secrets, so reading them needs operator too.
 			operator.POST("/nodes/:id/containers/:name/logs", nodeOps.ContainerLogs)
 			operator.POST("/nodes/:id/containers/:name/restart", nodeOps.RestartContainer)

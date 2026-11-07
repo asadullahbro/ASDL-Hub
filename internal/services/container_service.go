@@ -61,6 +61,7 @@ func (s *ContainerService) StopContainer(c *gin.Context) {
 		Type:       "container_stop",
 		Status:     models.JobStatusPending,
 		Command:    fmt.Sprintf("docker stop %s", container.Name),
+		Scope:      "container:" + container.Name,
 		MaxRetries: 2,
 		CreatedAt:  time.Now(),
 	}
@@ -93,6 +94,7 @@ func (s *ContainerService) StartContainer(c *gin.Context) {
 		Type:       "container_start",
 		Status:     models.JobStatusPending,
 		Command:    fmt.Sprintf("docker start %s", container.Name),
+		Scope:      "container:" + container.Name,
 		MaxRetries: 2,
 		CreatedAt:  time.Now(),
 	}
@@ -125,6 +127,7 @@ func (s *ContainerService) RestartContainer(c *gin.Context) {
 		Type:       "container_restart",
 		Status:     models.JobStatusPending,
 		Command:    fmt.Sprintf("docker restart %s", container.Name),
+		Scope:      "container:" + container.Name,
 		MaxRetries: 3,
 		CreatedAt:  time.Now(),
 	}

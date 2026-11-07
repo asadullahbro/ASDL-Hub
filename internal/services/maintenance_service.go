@@ -206,6 +206,7 @@ func (s *NodeOpsService) containerJobFor(c *gin.Context, jobType string, timeout
 		Command:    command(name),
 		MaxRetries: 0,
 		Timeout:    timeout,
+		Scope:      containerScope(&node, name),
 		CreatedAt:  time.Now(),
 	}
 	if err := s.db.Create(&job).Error; err != nil {
@@ -213,6 +214,17 @@ func (s *NodeOpsService) containerJobFor(c *gin.Context, jobType string, timeout
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID})
+}
+
+// containerScope is the Scope of a job on one container: its app's, when the agent reports which app the
+// container belongs to, so the job never overlaps a deploy of that app.
+func containerScope(node *models.Node, name string) string {
+	for _, c := range node.Containers {
+		if c.Name == name && c.ProjectID != "" {
+			return models.AppScope(c.ProjectID)
+		}
+	}
+	return "container:" + name
 }
 
 // ContainerLogs handles POST /nodes/:id/containers/:name/logs?lines=N[&follow=1]. With follow, the job keeps
@@ -330,4 +342,42 @@ func parseWGDump(out []byte) map[string]time.Time {
 		}
 	}
 	return res
+}
+
+// SetParallelJobs handles PUT /nodes/:id/parallel-jobs {"parallel_jobs": N}: how many jobs the node may run at
+// once (1 runs them one after another), between 1 and models.MaxParallelJobs. 0 goes back to the recommendation
+// for the node's hardware.
+func (s *NodeOpsService) SetParallelJobs(c *gin.Context) {
+	var req struct {
+		ParallelJobs *int `json:"parallel_jobs"`
+	}
+	if err := c.BindJSON(&req); err != nil || req.ParallelJobs == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": `send {"parallel_jobs": N}`})
+		return
+	}
+	n := *req.ParallelJobs
+	if n < 0 || n > models.MaxParallelJobs {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("parallel_jobs must be between 1 and %d (0 for the recommendation)", models.MaxParallelJobs)})
+		return
+	}
+	var node models.Node
+	if err := s.db.First(&node, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+	if n == 0 {
+		n = node.RecommendedParallelJobs
+	}
+	if err := s.db.Model(&node).Update("parallel_jobs", n).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	node.ParallelJobs = n
+	log.Printf("⚙️ %s may now run %d job(s) at once", node.Hostname, n)
+	c.JSON(http.StatusOK, gin.H{
+		"parallel_jobs":             n,
+		"recommended_parallel_jobs": node.RecommendedParallelJobs,
+		"agent_supports_parallel":   node.SupportsParallelJobs(),
+		"job_limit":                 node.JobLimit(),
+	})
 }

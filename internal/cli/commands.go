@@ -747,6 +747,7 @@ type versionInfo struct {
 	ReleaseURL      string `json:"release_url"`
 	CheckError      string `json:"check_error"`
 	Upgrading       string `json:"upgrading"`
+	WaitingForJobs  int    `json:"waiting_for_jobs"`
 }
 
 func (e *env) updateStatus(c *client) error {
@@ -758,6 +759,10 @@ func (e *env) updateStatus(c *client) error {
 		return e.printJSON(v)
 	}
 	switch {
+	case v.Upgrading != "" && v.WaitingForJobs > 0:
+		fmt.Fprintf(e.out, "Running %s; updating to %s once %d job(s) finish.\n", v.Current, v.Upgrading, v.WaitingForJobs)
+	case v.Upgrading != "":
+		fmt.Fprintf(e.out, "Running %s; updating to %s now.\n", v.Current, v.Upgrading)
 	case v.CheckError != "":
 		fmt.Fprintf(e.out, "Running %s; couldn't check for updates: %s\n", v.Current, v.CheckError)
 	case v.UpdateAvailable:
@@ -768,7 +773,7 @@ func (e *env) updateStatus(c *client) error {
 	return nil
 }
 
-func (e *env) updateInstall(c *client) error {
+func (e *env) updateInstall(c *client, now bool) error {
 	var v versionInfo
 	if err := c.do("GET", "/system/version?refresh=1", nil, &v); err != nil {
 		return err
@@ -777,11 +782,25 @@ func (e *env) updateInstall(c *client) error {
 		fmt.Fprintf(e.out, "Running %s, the latest release.\n", v.Current)
 		return nil
 	}
-	if err := c.do("POST", "/system/update", nil, nil); err != nil {
+	path := "/system/update"
+	if now {
+		path += "?now=1"
+	}
+	var started struct {
+		WaitingForJobs int `json:"waiting_for_jobs"`
+	}
+	if err := c.do("POST", path, nil, &started); err != nil {
 		return err
 	}
-	fmt.Fprintf(e.out, "Installing %s (the Hub restarts; this takes a minute)…\n", v.Latest)
 	deadline := time.Now().Add(5 * time.Minute)
+	if started.WaitingForJobs > 0 {
+		// The Hub restarts once they finish, so agents don't lose a job's result to the restart.
+		fmt.Fprintf(e.out, "Waiting for %d running or queued job(s) to finish, then installing %s (at most 30 minutes; --now skips the wait)…\n",
+			started.WaitingForJobs, v.Latest)
+		deadline = time.Now().Add(36 * time.Minute)
+	} else {
+		fmt.Fprintf(e.out, "Installing %s (the Hub restarts; this takes a minute)…\n", v.Latest)
+	}
 	for time.Now().Before(deadline) {
 		time.Sleep(5 * time.Second)
 		var now versionInfo
@@ -790,7 +809,7 @@ func (e *env) updateInstall(c *client) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("the Hub isn't on %s after 5 minutes; check `journalctl -u asdl-hub` on its server", v.Latest)
+	return fmt.Errorf("the Hub isn't on %s yet; check `asdl-hub update` and `journalctl -u asdl-hub` on its server", v.Latest)
 }
 
 func (e *env) whoami(c *client) error {

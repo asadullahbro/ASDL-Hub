@@ -36,10 +36,14 @@ type Job struct {
 	Retries     int              `json:"retries"`
 	MaxRetries  int              `json:"max_retries"`
 	Timeout     int              `json:"timeout"`
-	CreatedAt   time.Time        `json:"created_at"`
-	StartedAt   *time.Time       `json:"started_at,omitempty"`
-	CompletedAt *time.Time       `json:"completed_at,omitempty"`
-	DeletedAt   gorm.DeletedAt   `gorm:"index" json:"-"`
+	// Scope is what the job works on, "app:<project id>" or "container:<name>". Jobs with different scopes may
+	// run at the same time on a node that allows parallel jobs; jobs with the same scope run one after another,
+	// and a job with no scope (agent updates, ad-hoc commands) runs alone.
+	Scope       string         `gorm:"size:200;index" json:"scope,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	StartedAt   *time.Time     `json:"started_at,omitempty"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 const (
@@ -65,3 +69,6 @@ const (
 	JobTypeImagePull     = "image_pull"
 	JobTypeImagePush     = "image_push"
 )
+
+// AppScope is the Scope of a job that works on one app (project).
+func AppScope(projectID string) string { return "app:" + projectID }

@@ -13,7 +13,7 @@ const INSTALL_COMMAND = 'curl -fsSL https://get.asdl.website/asdl-hub | sudo ASD
 
 type Phase =
   | { kind: 'idle' }
-  | { kind: 'upgrading'; target: string; since: number }
+  | { kind: 'upgrading'; target: string; since: number; waiting?: number }
   | { kind: 'done'; version: string }
   | { kind: 'error'; message: string };
 
@@ -30,7 +30,7 @@ export function UpdateBanner() {
     try {
       const v = await api.getSystemVersion();
       setInfo(v);
-      if (v.upgrading) setPhase(p => (p.kind === 'idle' ? { kind: 'upgrading', target: v.upgrading, since: Date.now() } : p));
+      if (v.upgrading) setPhase(p => (p.kind === 'idle' ? { kind: 'upgrading', target: v.upgrading, since: Date.now(), waiting: v.waiting_for_jobs } : p));
     } catch {
       /* not signed in yet, or the Hub is restarting */
     }
@@ -53,7 +53,7 @@ export function UpdateBanner() {
   useEffect(() => {
     if (phase.kind !== 'upgrading') return;
     poll.current = setInterval(async () => {
-      if (Date.now() - phase.since > UPGRADE_TIMEOUT) {
+      if (!phase.waiting && Date.now() - phase.since > UPGRADE_TIMEOUT) {
         setPhase({
           kind: 'error',
           message: 'The update is taking longer than expected. Check /var/log/asdl-hub-upgrade.log on the server.',
@@ -66,6 +66,9 @@ export function UpdateBanner() {
           setInfo(v);
           setPhase({ kind: 'done', version: v.current });
           setTimeout(() => window.location.reload(), 2500);
+        } else if ((v.waiting_for_jobs || 0) !== (phase.waiting || 0)) {
+          // Still waiting on jobs, or it just started: the restart timeout runs from now.
+          setPhase({ kind: 'upgrading', target: phase.target, since: Date.now(), waiting: v.waiting_for_jobs });
         }
       } catch {
         /* the Hub is restarting */
@@ -83,7 +86,7 @@ export function UpdateBanner() {
     )) return;
     try {
       const r = await api.startSystemUpdate();
-      setPhase({ kind: 'upgrading', target: r.upgrading, since: Date.now() });
+      setPhase({ kind: 'upgrading', target: r.upgrading, since: Date.now(), waiting: r.waiting_for_jobs });
     } catch (err) {
       setPhase({ kind: 'error', message: err instanceof Error ? err.message : 'Could not start the update' });
     }
@@ -104,8 +107,17 @@ export function UpdateBanner() {
       <Bar tone="accent">
         <Spinner />
         <span>
-          Updating ASDL Hub to <b className="font-mono">{phase.target}</b>. The dashboard will reconnect by itself —
-          apps keep running meanwhile.
+          {phase.waiting ? (
+            <>
+              Updating ASDL Hub to <b className="font-mono">{phase.target}</b> once {phase.waiting} running job
+              {phase.waiting === 1 ? '' : 's'} finish, so no deploy loses its result to the restart.
+            </>
+          ) : (
+            <>
+              Updating ASDL Hub to <b className="font-mono">{phase.target}</b>. The dashboard will reconnect by itself —
+              apps keep running meanwhile.
+            </>
+          )}
         </span>
       </Bar>
     );

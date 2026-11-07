@@ -88,6 +88,11 @@ func (s *NodeService) Register(c *gin.Context) {
 		node.MemoryTotal = req.MemoryTotal
 		node.DiskTotal = req.DiskTotal
 		node.Capabilities = req.Capabilities
+		started := time.Now()
+		node.AgentStartedAt = &started
+		if node.ParallelJobs == 0 {
+			node.ParallelJobs = models.RecommendedParallelJobs(node.CPU, node.MemoryTotal)
+		}
 		if !node.Online {
 			notifyNodeOnline(&node)
 			closeOutage(s.db, node.ID, time.Now(), -1)
@@ -112,6 +117,9 @@ func (s *NodeService) Register(c *gin.Context) {
 		Online:        true,
 		Capabilities:  req.Capabilities,
 		LastHeartbeat: time.Now(),
+		// Sized to the hardware at enrollment; it can be changed on the node's page.
+		ParallelJobs:   models.RecommendedParallelJobs(req.CPU, req.MemoryTotal),
+		AgentStartedAt: func() *time.Time { t := time.Now(); return &t }(),
 	}
 
 	s.db.Create(&node)

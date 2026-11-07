@@ -66,7 +66,7 @@ Hub server (run these on it, with sudo)
 
 Hub
   update                      Is a new release out?
-  update install              Install the latest release
+  update install [--now]      Install the latest release, once running jobs finish (--now: don't wait)
   login <hub url>             Sign in to a Hub (saved in ~/.config/asdl-hub)
   logout                      Forget that login
   whoami                      Which Hub and user commands go to
@@ -264,7 +264,7 @@ func (e *env) run(cmd string, args []string) error {
 		return e.notifyList(c)
 	case "update":
 		if len(args) > 0 && args[0] == "install" {
-			return e.updateInstall(c)
+			return e.updateInstall(c, len(args) > 1 && args[1] == "--now")
 		}
 		return e.updateStatus(c)
 	case "whoami":

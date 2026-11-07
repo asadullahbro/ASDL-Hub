@@ -42,6 +42,62 @@ type Node struct {
 	MaintenanceBy    string     `gorm:"size:100" json:"maintenance_by,omitempty"`
 	// Containers is what the agent last reported running on the node.
 	Containers []NodeContainer `gorm:"serializer:json" json:"containers"`
+	// ParallelJobs is how many jobs the node may run at once; 1 runs them one after another. It is set from the
+	// node's hardware when it enrolls (see RecommendedParallelJobs) and can be changed later. 0: not set yet.
+	ParallelJobs int `gorm:"not null;default:0" json:"parallel_jobs"`
+	// RecommendedParallelJobs is what the node's hardware suggests, for the dashboard. Not stored.
+	RecommendedParallelJobs int `gorm:"-" json:"recommended_parallel_jobs"`
+	// AgentStartedAt is when the node's agent last registered (it does so when it starts). Jobs still marked
+	// running from before then belong to an agent process that is gone, so they don't hold up the queue.
+	AgentStartedAt *time.Time `json:"agent_started_at,omitempty"`
+}
+
+// ParallelJobsCapability is what an agent reports when it can run several jobs at once.
+const ParallelJobsCapability = "parallel_jobs"
+
+// MaxParallelJobs is the most jobs a node may be set to run at once.
+const MaxParallelJobs = 8
+
+// RecommendedParallelJobs is how many jobs a node with these resources should run at once: one per 4 GB of RAM
+// and per 2 CPU cores (a deploy pulls and unpacks an image and starts a container, which is mostly memory and
+// disk), at least 1 and at most 4. Unknown resources don't limit it.
+func RecommendedParallelJobs(cpus int, memoryTotal int64) int {
+	const gib = 1 << 30
+	n := 4
+	if memoryTotal > 0 {
+		n = min(n, int(memoryTotal/(4*gib)))
+	}
+	if cpus > 0 {
+		n = min(n, cpus/2)
+	}
+	return max(n, 1)
+}
+
+func (n *Node) AfterFind(*gorm.DB) error {
+	n.RecommendedParallelJobs = RecommendedParallelJobs(n.CPU, n.MemoryTotal)
+	return nil
+}
+
+// SupportsParallelJobs reports whether the node's agent can run several jobs at once.
+func (n *Node) SupportsParallelJobs() bool {
+	for _, c := range n.Capabilities {
+		if c == ParallelJobsCapability {
+			return true
+		}
+	}
+	return false
+}
+
+// JobLimit is how many jobs the node may run at once right now: its setting (or the recommendation while it has
+// none), and 1 when its agent can only run one.
+func (n *Node) JobLimit() int {
+	if !n.SupportsParallelJobs() {
+		return 1
+	}
+	if n.ParallelJobs > 0 {
+		return n.ParallelJobs
+	}
+	return RecommendedParallelJobs(n.CPU, n.MemoryTotal)
 }
 
 // NodeSample is one reading of a node's load, for the graphs on its page. Unlike Heartbeat (only the latest per
