@@ -32,8 +32,9 @@ Apps
   env set <app> [KEY]         Add or change variables; values are asked for
                               at a hidden prompt (the app redeploys)
   env unset <app> [KEY]       Remove variables
-  move <app> [node]           Move an app to another node (without one, the
-                              best node is suggested and you are asked)
+  move <app>... [node]        Move apps to another node (without one, the best
+                              node is suggested and you are asked). Several apps
+                              move at once, as many side by side as the node allows
   rollback <app>              Put an app's previous version back
   restart <app>               Restart an app's container
   snapshots <app>             Copies of an app's plugin data (e.g. Redis) kept on the Hub
@@ -190,14 +191,14 @@ func (e *env) run(cmd string, args []string) error {
 		}
 		return e.deploy(c, args[0])
 	case "move":
-		if err := needArgs(args, 1, "an app, and optionally a node: asdl-hub move <app> [node]"); err != nil {
+		if err := needArgs(args, 1, "an app, and optionally a node: asdl-hub move <app>... [node]"); err != nil {
 			return err
 		}
-		to := ""
-		if len(args) > 1 {
-			to = args[1]
+		apps, to := splitMoveArgs(c, args)
+		if len(apps) == 1 {
+			return e.move(c, apps[0], to)
 		}
-		return e.move(c, args[0], to)
+		return e.moveMany(c, apps, to)
 	case "rollback":
 		if err := needArgs(args, 1, "an app name"); err != nil {
 			return err
@@ -384,4 +385,17 @@ func (e *env) paint(code, s string) string {
 		return s
 	}
 	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+// splitMoveArgs reads `move <app>... [node]`: the last word is the target when it names a node, otherwise every
+// word is an app and each goes to its best node.
+func splitMoveArgs(c *client, args []string) (apps []string, to string) {
+	if len(args) == 1 {
+		return args, ""
+	}
+	last := args[len(args)-1]
+	if _, err := c.findNode(last); err == nil {
+		return args[:len(args)-1], last
+	}
+	return args, ""
 }

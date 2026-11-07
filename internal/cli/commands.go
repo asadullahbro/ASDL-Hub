@@ -450,40 +450,140 @@ func (e *env) deploy(c *client, name string) error {
 }
 
 func (e *env) move(c *client, app, to string) error {
+	m, err := e.startMove(c, app, to)
+	if err != nil || m == nil {
+		return err
+	}
+	fmt.Fprintf(e.out, "Moving %s to %s…\n", m.app, m.node)
+	if m.jobID == "" {
+		fmt.Fprintln(e.out, "Started; follow it with `asdl-hub jobs`.")
+		return nil
+	}
+	return e.follow(c, m.jobID, 10*time.Minute, false)
+}
+
+// startedMove is a move the Hub has accepted: the app, where it goes, and the deploy job doing it.
+type startedMove struct {
+	app, node, nodeID, jobID string
+	started                  time.Time
+}
+
+// startMove asks the Hub to move app to the node named to (the best match when empty). It returns nil, nil when
+// the app already runs there.
+func (e *env) startMove(c *client, app, to string) (*startedMove, error) {
 	p, err := c.findApp(app)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if to == "" {
 		to, err = e.suggestNode(c, p)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	n, err := c.findNode(to)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if n.ID == p.NodeID {
 		fmt.Fprintf(e.out, "%s already runs on %s.\n", p.Name, n.Hostname)
-		return nil
+		return nil, nil
 	}
 	var res map[string]interface{}
 	if err := c.do("POST", "/migrations", map[string]string{"project_id": p.ID, "target_node_id": n.ID}, &res); err != nil {
-		return err
+		return nil, fmt.Errorf("%s: %w", p.Name, err)
 	}
-	fmt.Fprintf(e.out, "Moving %s to %s…\n", p.Name, n.Hostname)
 	jobID, _ := res["start_job_id"].(string)
 	if jobID == "" {
 		if m, ok := res["migration"].(map[string]interface{}); ok {
 			jobID, _ = m["job_id"].(string)
 		}
 	}
-	if jobID == "" {
-		fmt.Fprintln(e.out, "Started; follow it with `asdl-hub jobs`.")
+	return &startedMove{app: p.Name, node: n.Hostname, nodeID: n.ID, jobID: jobID, started: time.Now()}, nil
+}
+
+// moveMany moves several apps at once: every move is handed to the Hub first, so each target node runs as many
+// side by side as its parallel jobs setting allows, then it waits for all of them and reports each as it ends.
+// With to empty each app goes to its own best node.
+func (e *env) moveMany(c *client, apps []string, to string) error {
+	var moves []*startedMove
+	var failed []string
+	for _, a := range apps {
+		m, err := e.startMove(c, a, to)
+		if err != nil {
+			fmt.Fprintln(e.out, e.paint(red, "✗ "+err.Error()))
+			failed = append(failed, a)
+			continue
+		}
+		if m != nil {
+			moves = append(moves, m)
+		}
+	}
+	if len(moves) == 0 {
+		if len(failed) > 0 {
+			return fmt.Errorf("%d move(s) could not start", len(failed))
+		}
 		return nil
 	}
-	return e.follow(c, jobID, 10*time.Minute, false)
+
+	// Say how many each target runs at once, so a queue isn't mistaken for a hang.
+	perNode := map[string]int{}
+	for _, m := range moves {
+		perNode[m.nodeID]++
+	}
+	nodes, _ := c.nodes()
+	for _, n := range nodes {
+		count := perNode[n.ID]
+		if count == 0 {
+			continue
+		}
+		at := jobsCell(n)
+		switch {
+		case at == "-" || at == "1 (old agent)" || at == "1":
+			at = "one at a time"
+		default:
+			at = "up to " + at + " at a time"
+		}
+		fmt.Fprintf(e.out, "Moving %d app(s) to %s, %s…\n", count, n.Hostname, at)
+	}
+
+	deadline := time.Now().Add(15 * time.Minute)
+	pending := moves
+	for len(pending) > 0 && time.Now().Before(deadline) {
+		time.Sleep(1500 * time.Millisecond)
+		var still []*startedMove
+		for _, m := range pending {
+			if m.jobID == "" {
+				fmt.Fprintf(e.out, "• %s → %s started; follow it with `asdl-hub jobs`\n", m.app, m.node)
+				continue
+			}
+			var j job
+			if err := c.do("GET", "/jobs/"+m.jobID, nil, &j); err != nil {
+				still = append(still, m)
+				continue
+			}
+			switch j.Status {
+			case "completed":
+				fmt.Fprintln(e.out, e.paint(green, fmt.Sprintf("✓ %s moved to %s (%s)", m.app, m.node, time.Since(m.started).Round(time.Second))))
+			case "failed", "cancelled":
+				fmt.Fprintln(e.out, e.paint(red, fmt.Sprintf("✗ %s did not move to %s: job %s (see `asdl-hub job %s`)", m.app, m.node, j.Status, short(m.jobID))))
+				failed = append(failed, m.app)
+			default:
+				still = append(still, m)
+			}
+		}
+		pending = still
+	}
+	for _, m := range pending {
+		fmt.Fprintf(e.out, "… %s is still moving; follow it with `asdl-hub job %s`\n", m.app, short(m.jobID))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d move(s) failed", len(failed), len(apps))
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("%d move(s) still running after 15 minutes", len(pending))
+	}
+	return nil
 }
 
 func (e *env) restart(c *client, name string) error {
