@@ -397,9 +397,17 @@ func splitMoveArgs(c *client, args []string) (apps []string, to string, err erro
 	apps = args
 	if len(args) > 1 {
 		last := args[len(args)-1]
-		if _, nodeErr := c.findNode(last); nodeErr == nil {
+		_, nodeErr := c.findNode(last)
+		_, appErr := c.findApp(last)
+		var ambiguous ambiguousName
+		switch {
+		case nodeErr == nil:
 			apps, to = args[:len(args)-1], last
-		} else if _, appErr := c.findApp(last); appErr != nil {
+		case appErr == nil:
+			// one more app; each goes to its best node
+		case errors.As(nodeErr, &ambiguous):
+			return nil, "", nodeErr // the start of several node names: say which
+		default:
 			return nil, "", fmt.Errorf("%q is neither a node nor an app: %v", last, nodeErr)
 		}
 	}

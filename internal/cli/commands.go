@@ -140,6 +140,16 @@ func (c *client) projects() ([]project, error) {
 }
 
 // findApp finds an app by name or ID (or a unique ID prefix).
+// ambiguousName is a name that is the start of more than one node's or app's name.
+type ambiguousName struct {
+	kind, name string
+	matches    []string
+}
+
+func (e ambiguousName) Error() string {
+	return fmt.Sprintf("%q could be more than one %s (%s): type more of the name", e.name, e.kind, strings.Join(e.matches, ", "))
+}
+
 func (c *client) findApp(name string) (*project, error) {
 	list, err := c.projects()
 	if err != nil {
@@ -157,6 +167,13 @@ func (c *client) findApp(name string) (*project, error) {
 	}
 	if len(prefix) == 1 {
 		return &prefix[0], nil
+	}
+	if len(prefix) > 1 {
+		matches := make([]string, len(prefix))
+		for i, p := range prefix {
+			matches[i] = p.Name
+		}
+		return nil, ambiguousName{"app", name, matches}
 	}
 	names := make([]string, len(list))
 	for i, p := range list {
@@ -185,6 +202,13 @@ func (c *client) findNode(name string) (*node, error) {
 	}
 	if len(loose) == 1 {
 		return &loose[0], nil
+	}
+	if len(loose) > 1 {
+		matches := make([]string, len(loose))
+		for i, n := range loose {
+			matches[i] = n.Hostname
+		}
+		return nil, ambiguousName{"node", name, matches}
 	}
 	names := make([]string, len(list))
 	for i, n := range list {

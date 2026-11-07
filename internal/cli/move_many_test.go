@@ -110,10 +110,23 @@ func TestSplitMoveArgs(t *testing.T) {
 func TestSplitMoveArgs_TypoMovesNothing(t *testing.T) {
 	c := splitServer(t)
 	_, _, err := splitMoveArgs(c, []string{"ai-chat", "asadullah"})
-	if err == nil || !strings.Contains(err.Error(), `"asadullah" is neither a node nor an app`) {
+	if err == nil || !strings.Contains(err.Error(), "could be more than one node") {
+		t.Errorf("err = %v", err)
+	}
+	_, _, err = splitMoveArgs(c, []string{"ai-chat", "laptp"})
+	if err == nil || !strings.Contains(err.Error(), `"laptp" is neither a node nor an app`) {
 		t.Errorf("err = %v", err)
 	}
 	if _, _, err := splitMoveArgs(c, []string{"ai-chat", "nope", "asadullahs-laptop"}); err == nil {
 		t.Error("an unknown app among several was accepted")
+	}
+}
+
+// "asadullahs" starts both asadullahs-laptop and asadullahs-pc: say so, rather than "no node called".
+func TestSplitMoveArgs_AmbiguousNodeNamesTheCandidates(t *testing.T) {
+	c := splitServer(t)
+	_, _, err := splitMoveArgs(c, []string{"ai-chat", "asadullahs"})
+	if err == nil || !strings.Contains(err.Error(), `"asadullahs" could be more than one node (asadullahs-laptop, asadullahs-pc): type more of the name`) {
+		t.Errorf("err = %v", err)
 	}
 }
