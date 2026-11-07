@@ -47,6 +47,9 @@ Apps
 Nodes
   outages <node>              A node's outages, their likely cause, and when they happen
   maintenance <node> on|off   Move apps off a node before working on it, or end that
+  node set <node> parallel-jobs=N|auto
+                              How many jobs (deploys, failovers) the node runs at once:
+                              1 to 8, 1 for one at a time, auto for its hardware's share
   node remove <node>          Forget a node for good (move its apps off first)
 
 Jobs and alerts
@@ -222,8 +225,11 @@ func (e *env) run(cmd string, args []string) error {
 		}
 		return e.logs(c, app[0], *n, *f)
 	case "node":
+		if len(args) >= 2 && args[0] == "set" {
+			return e.nodeSet(c, args[1], args[2:])
+		}
 		if len(args) < 2 || args[0] != "remove" {
-			return usageError{"expected asdl-hub node remove <node> [--yes]"}
+			return usageError{"expected asdl-hub node set <node> parallel-jobs=N|auto, or node remove <node> [--yes]"}
 		}
 		yes := false
 		var name string

@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,36 @@ type node struct {
 	PingLatency      float64    `json:"ping_latency"`
 	HealthScore      float64    `json:"health_score"`
 	MaintenanceSince *time.Time `json:"maintenance_since"`
+	Capabilities     []string   `json:"capabilities"`
+	// How many jobs the node may run at once, and what its hardware suggests (0 from Hubs before v0.20.4).
+	ParallelJobs            int `json:"parallel_jobs"`
+	RecommendedParallelJobs int `json:"recommended_parallel_jobs"`
+}
+
+// supportsParallelJobs reports whether the node's agent can run several jobs at once.
+func (n node) supportsParallelJobs() bool {
+	for _, c := range n.Capabilities {
+		if c == "parallel_jobs" {
+			return true
+		}
+	}
+	return false
+}
+
+// jobsCell is how many jobs the node runs at once: its setting (or the recommendation until it has one), "1 (old
+// agent)" when its agent can only run one, and "-" from a Hub that doesn't know.
+func jobsCell(n node) string {
+	limit := n.ParallelJobs
+	if limit == 0 {
+		limit = n.RecommendedParallelJobs
+	}
+	switch {
+	case limit == 0:
+		return "-"
+	case !n.supportsParallelJobs():
+		return "1 (old agent)"
+	}
+	return strconv.Itoa(limit)
 }
 
 type project struct {
@@ -279,10 +310,10 @@ func (e *env) nodes(c *client) error {
 	}
 	up := c.uptimes()
 	w := e.table()
-	fmt.Fprintln(w, "NODE\tSTATE\tADDRESS\tAGENT\tMEMORY GB\tDISK GB\tAPPS\tLAST SEEN\tUPTIME 7D\tLAST OUTAGE")
+	fmt.Fprintln(w, "NODE\tSTATE\tADDRESS\tAGENT\tMEMORY GB\tDISK GB\tAPPS\tJOBS\tLAST SEEN\tUPTIME 7D\tLAST OUTAGE")
 	for _, n := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s/%s\t%s/%s\t%d\t%s\t%s\t%s\n", n.Hostname, e.nodeState(n), n.VPNIP, orDash(n.AgentVersion),
-			gb(n.MemoryUsed), gb(n.MemoryTotal), gb(n.DiskUsed), gb(n.DiskTotal), count[n.ID], ago(n.LastHeartbeat),
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s/%s\t%s/%s\t%d\t%s\t%s\t%s\t%s\n", n.Hostname, e.nodeState(n), n.VPNIP, orDash(n.AgentVersion),
+			gb(n.MemoryUsed), gb(n.MemoryTotal), gb(n.DiskUsed), gb(n.DiskTotal), count[n.ID], jobsCell(n), ago(n.LastHeartbeat),
 			uptimeCell(up[n.ID]), lastOutageCell(up[n.ID]))
 	}
 	return w.Flush()
@@ -851,6 +882,57 @@ func (e *env) removeNode(c *client, name string, yes bool) error {
 	fmt.Fprintf(e.out, "Removed %s.\n", n.Hostname)
 	if n.Online {
 		fmt.Fprintln(e.out, "Uninstall the agent on that machine: https://docs.asdl.website/hub/add-a-node/#remove-a-node")
+	}
+	return nil
+}
+
+// nodeSet changes a node's settings from key=value pairs. Only parallel-jobs exists so far: how many jobs the node
+// runs at once, 1 to 8, 1 for one after another, or "auto" for what its hardware suggests.
+func (e *env) nodeSet(c *client, name string, pairs []string) error {
+	n, err := c.findNode(name)
+	if err != nil {
+		return err
+	}
+	if len(pairs) == 0 {
+		return usageError{"expected asdl-hub node set <node> parallel-jobs=N|auto"}
+	}
+	for _, p := range pairs {
+		key, value, ok := strings.Cut(p, "=")
+		if !ok {
+			return usageError{fmt.Sprintf("expected key=value, got %q", p)}
+		}
+		switch strings.ReplaceAll(strings.ToLower(key), "_", "-") {
+		case "parallel-jobs", "parallel", "jobs":
+			jobs := 0 // the Hub's recommendation for the node's hardware
+			if value != "auto" {
+				jobs, err = strconv.Atoi(value)
+				if err != nil || jobs < 1 || jobs > 8 {
+					return usageError{fmt.Sprintf("parallel-jobs must be a number from 1 to 8, or auto; got %q", value)}
+				}
+			}
+			var res struct {
+				ParallelJobs            int  `json:"parallel_jobs"`
+				RecommendedParallelJobs int  `json:"recommended_parallel_jobs"`
+				AgentSupportsParallel   bool `json:"agent_supports_parallel"`
+			}
+			body := map[string]int{"parallel_jobs": jobs}
+			if err := c.do("PUT", "/nodes/"+n.ID+"/parallel-jobs", body, &res); err != nil {
+				return err
+			}
+			if e.json {
+				return e.printJSON(res)
+			}
+			what := fmt.Sprintf("%d jobs at once", res.ParallelJobs)
+			if res.ParallelJobs == 1 {
+				what = "one job at a time"
+			}
+			fmt.Fprintf(e.out, "%s now runs %s (recommended for its hardware: %d).\n", n.Hostname, what, res.RecommendedParallelJobs)
+			if !res.AgentSupportsParallel && res.ParallelJobs > 1 {
+				fmt.Fprintf(e.out, "Its agent (%s) runs one job at a time until it is updated.\n", orDash(n.AgentVersion))
+			}
+		default:
+			return usageError{fmt.Sprintf("unknown node setting %q (there is parallel-jobs)", key)}
+		}
 	}
 	return nil
 }
