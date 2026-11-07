@@ -50,6 +50,8 @@ type Node struct {
 	// AgentStartedAt is when the node's agent last registered (it does so when it starts). Jobs still marked
 	// running from before then belong to an agent process that is gone, so they don't hold up the queue.
 	AgentStartedAt *time.Time `json:"agent_started_at,omitempty"`
+	// GoingAwayAt is when the node's agent last said it was stopping on purpose; cleared when it is back.
+	GoingAwayAt *time.Time `json:"going_away_at,omitempty"`
 }
 
 // ParallelJobsCapability is what an agent reports when it can run several jobs at once.
@@ -139,6 +141,10 @@ type NodeOutage struct {
 	// WiFiAtStart and PingAtStart are the node's last reported WiFi signal (0-100) and ping (ms) before it went quiet.
 	WiFiAtStart int     `json:"wifi_at_start"`
 	PingAtStart float64 `json:"ping_at_start"`
+	// Planned is set when the node's agent said it was going away just before it went quiet (someone stopped it,
+	// or the machine was shut down or rebooted cleanly). Planned outages don't count as the node being unreliable
+	// when the Hub picks where an app goes.
+	Planned bool `gorm:"not null;default:false" json:"planned"`
 }
 
 // NodeContainer is one container as the node's agent reports it.

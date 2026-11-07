@@ -365,6 +365,7 @@ For the command line, run: asdl-hub help
 		{
 			mesh.POST("/nodes", nodeService.Register)
 			mesh.POST("/nodes/:id/heartbeat", nodeService.Heartbeat)
+			mesh.POST("/nodes/:id/going-away", nodeService.GoingAway)
 			mesh.POST("/nodes/:id/maintenance", nodeOps.SetMaintenanceFromNode)
 			mesh.POST("/jobs/claim", jobService.Claim)
 			mesh.POST("/jobs/:id/logs", jobService.AppendLogs)

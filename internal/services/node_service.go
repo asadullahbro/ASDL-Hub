@@ -90,6 +90,7 @@ func (s *NodeService) Register(c *gin.Context) {
 		node.Capabilities = req.Capabilities
 		started := time.Now()
 		node.AgentStartedAt = &started
+		node.GoingAwayAt = nil
 		if node.ParallelJobs == 0 {
 			node.ParallelJobs = models.RecommendedParallelJobs(node.CPU, node.MemoryTotal)
 		}
@@ -514,10 +515,14 @@ func (s *NodeService) sweepOffline(now, started time.Time) {
 			s.db.Save(&node)
 			openOutage(s.db, &node)
 			log.Printf("🔴 Node %s marked offline (last heartbeat: %v)", node.Hostname, node.LastHeartbeat)
+			msg := fmt.Sprintf("No heartbeat from %s for %s. Its apps move to other nodes if they stop answering.", node.Hostname, now.Sub(node.LastHeartbeat).Round(time.Second))
+			if wentAwayOnPurpose(&node) {
+				msg = fmt.Sprintf("%s's agent was stopped on purpose (or the machine shut down cleanly). Its apps move to other nodes if they stop answering; this outage doesn't count against the node.", node.Hostname)
+			}
 			notify(Event{
 				Type: EventNodeOffline, Level: LevelError,
 				Title:   node.Hostname + " is offline",
-				Message: fmt.Sprintf("No heartbeat from %s for %s. Its apps move to other nodes if they stop answering.", node.Hostname, now.Sub(node.LastHeartbeat).Round(time.Second)),
+				Message: msg,
 				Fields:  []EventField{{Name: "Address", Value: node.VPNIP}},
 				URL:     link("/nodes"), Node: node.Hostname,
 			})
@@ -569,4 +574,19 @@ func (s *NodeService) Remove(c *gin.Context, removePeers func(publicKey, vpnIP s
 	}
 	log.Printf("🗑️ Node %s (%s) removed", node.Hostname, node.VPNIP)
 	c.JSON(http.StatusOK, gin.H{"removed": node.Hostname})
+}
+
+// GoingAway handles POST /nodes/:id/going-away: the node's agent is stopping on purpose (someone stopped the
+// service, or the machine is shutting down). The outage that follows is recorded as planned. As with
+// heartbeats, the node is whoever's address the request came from.
+func (s *NodeService) GoingAway(c *gin.Context) {
+	node, err := nodeByAddress(s.db, c)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+	now := time.Now()
+	s.db.Model(node).Update("going_away_at", now)
+	log.Printf("👋 %s's agent is stopping on purpose", node.Hostname)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

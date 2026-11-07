@@ -193,6 +193,8 @@ export interface NodeOutage {
   cause?: 'reboot' | 'weak_link' | 'connection' | '';
   wifi_at_start?: number; // last WiFi signal (0-100) before it went quiet; 0 when wired or unknown
   ping_at_start?: number; // last ping in ms before it went quiet
+  // The agent said it was stopping on purpose just before; planned outages don't count against the node.
+  planned?: boolean;
 }
 
 // One reading of a node's load, taken about once a minute (kept for two weeks).

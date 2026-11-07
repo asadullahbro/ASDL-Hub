@@ -113,6 +113,7 @@ type nodeUptime struct {
 		EndedAt   *time.Time `json:"ended_at"`
 		Seconds   int64      `json:"seconds"`
 		Cause     string     `json:"cause"`
+		Planned   bool       `json:"planned"`
 	} `json:"last_outage"`
 }
 
@@ -337,7 +338,7 @@ func lastOutageCell(u nodeUptime) string {
 		return "ongoing, " + duration(time.Since(o.StartedAt))
 	}
 	cell := duration(time.Duration(o.Seconds)*time.Second) + ", " + ago(*o.EndedAt)
-	if l := causeLabel(o.Cause); l != "-" {
+	if l := outageLabel(o.Cause, o.Planned); l != "-" {
 		cell += " (" + l + ")"
 	}
 	return cell

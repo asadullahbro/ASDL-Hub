@@ -23,10 +23,24 @@ func openOutage(db *gorm.DB, node *models.Node) {
 	if open > 0 {
 		return
 	}
-	o := models.NodeOutage{NodeID: node.ID, StartedAt: node.LastHeartbeat, WiFiAtStart: node.WiFiSignal, PingAtStart: node.PingLatency}
+	o := models.NodeOutage{NodeID: node.ID, StartedAt: node.LastHeartbeat, WiFiAtStart: node.WiFiSignal, PingAtStart: node.PingLatency,
+		Planned: wentAwayOnPurpose(node)}
 	if err := db.Create(&o).Error; err != nil {
 		log.Printf("⚠️ Could not record the outage of %s: %v", node.Hostname, err)
 	}
+}
+
+// goingAwayWindow is how close to its last heartbeat an agent's "going away" must be for the outage that follows
+// to count as planned. An agent says it just before it stops, so the two are seconds apart.
+const goingAwayWindow = 2 * time.Minute
+
+// wentAwayOnPurpose reports whether the node's agent said it was stopping right around its last heartbeat.
+func wentAwayOnPurpose(node *models.Node) bool {
+	if node.GoingAwayAt == nil {
+		return false
+	}
+	d := node.GoingAwayAt.Sub(node.LastHeartbeat)
+	return d > -goingAwayWindow && d < goingAwayWindow
 }
 
 // Thresholds shared with the node health score: under 50 is a weak WiFi signal, over 100 ms a slow link.

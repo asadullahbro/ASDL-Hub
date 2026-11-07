@@ -55,12 +55,12 @@ func TestMoveMany_StartsAllThenWaits(t *testing.T) {
 	t.Setenv("ASDL_HUB_TOKEN", "t")
 
 	c, _ := newClient()
-	apps, to := splitMoveArgs(c, []string{"ai-chat", "gamer-ak-bot", "profile-cards", "laptop"})
-	if to != "laptop" || len(apps) != 3 {
-		t.Fatalf("split into %v → %q", apps, to)
+	apps, to, err := splitMoveArgs(c, []string{"ai-chat", "gamer-ak-bot", "profile-cards", "laptop"})
+	if err != nil || to != "laptop" || len(apps) != 3 {
+		t.Fatalf("split into %v → %q (%v)", apps, to, err)
 	}
 	var out bytes.Buffer
-	err := (&env{out: &out}).moveMany(c, apps, to)
+	err = (&env{out: &out}).moveMany(c, apps, to)
 	if err == nil || !strings.Contains(err.Error(), "1 of 3") {
 		t.Errorf("err = %v, want 1 of 3 failed", err)
 	}
@@ -75,15 +75,45 @@ func TestMoveMany_StartsAllThenWaits(t *testing.T) {
 	}
 }
 
-func TestSplitMoveArgs_WithoutANode(t *testing.T) {
+func splitServer(t *testing.T) *client {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{{"id": "n1", "hostname": "laptop"}})
+		switch r.URL.Path {
+		case "/api/v1/nodes":
+			// Two nodes sharing a prefix, as on the real Hub: "asadullah" matches neither on its own.
+			json.NewEncoder(w).Encode([]map[string]interface{}{{"id": "n1", "hostname": "asadullahs-laptop"}, {"id": "n2", "hostname": "asadullahs-pc"}})
+		case "/api/v1/projects":
+			json.NewEncoder(w).Encode(map[string]interface{}{"data": []map[string]interface{}{
+				{"id": "p1", "name": "ai-chat"}, {"id": "p2", "name": "modscore"}}})
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("ASDL_HUB_URL", srv.URL)
 	t.Setenv("ASDL_HUB_TOKEN", "t")
 	c, _ := newClient()
-	if apps, to := splitMoveArgs(c, []string{"ai-chat", "modscore"}); to != "" || len(apps) != 2 {
-		t.Errorf("no node named: got %v → %q", apps, to)
+	return c
+}
+
+func TestSplitMoveArgs(t *testing.T) {
+	c := splitServer(t)
+	if apps, to, err := splitMoveArgs(c, []string{"ai-chat", "modscore"}); err != nil || to != "" || len(apps) != 2 {
+		t.Errorf("two apps, no node: got %v → %q (%v)", apps, to, err)
+	}
+	if apps, to, err := splitMoveArgs(c, []string{"ai-chat", "asadullahs-laptop"}); err != nil || to != "asadullahs-laptop" || len(apps) != 1 {
+		t.Errorf("app and node: got %v → %q (%v)", apps, to, err)
+	}
+}
+
+// `move ai-chat asadullah` (a node name cut short) once moved ai-chat to the suggested node and only then said
+// there was no app called "asadullah". A word that is neither a node nor an app stops it before anything moves.
+func TestSplitMoveArgs_TypoMovesNothing(t *testing.T) {
+	c := splitServer(t)
+	_, _, err := splitMoveArgs(c, []string{"ai-chat", "asadullah"})
+	if err == nil || !strings.Contains(err.Error(), `"asadullah" is neither a node nor an app`) {
+		t.Errorf("err = %v", err)
+	}
+	if _, _, err := splitMoveArgs(c, []string{"ai-chat", "nope", "asadullahs-laptop"}); err == nil {
+		t.Error("an unknown app among several was accepted")
 	}
 }

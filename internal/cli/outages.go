@@ -17,6 +17,7 @@ type outageRow struct {
 	Cause       string     `json:"cause"`
 	WiFiAtStart int        `json:"wifi_at_start"`
 	PingAtStart float64    `json:"ping_at_start"`
+	Planned     bool       `json:"planned"`
 }
 
 // causeLabel is the cause in words, "-" when the Hub could not tell (an outage from before causes were recorded).
@@ -30,6 +31,17 @@ func causeLabel(cause string) string {
 		return "connection"
 	}
 	return "-"
+}
+
+// outageLabel is causeLabel, said differently when the node's agent was stopped on purpose (a planned outage).
+func outageLabel(cause string, planned bool) string {
+	if !planned {
+		return causeLabel(cause)
+	}
+	if cause == "reboot" {
+		return "planned restart"
+	}
+	return "stopped on purpose"
 }
 
 // outagePattern says when outages tend to start, if they cluster: the busiest three hours of the day (in loc)
@@ -63,7 +75,7 @@ func causeSummary(outages []outageRow) string {
 	counts := map[string]int{}
 	for _, o := range outages {
 		if o.EndedAt != nil && o.Cause != "" {
-			counts[causeLabel(o.Cause)]++
+			counts[outageLabel(o.Cause, o.Planned)]++
 		}
 	}
 	labels := make([]string, 0, len(counts))
@@ -116,7 +128,7 @@ func (e *env) outages(c *client, name string) error {
 		if o.PingAtStart > 0 {
 			ping = fmt.Sprintf("%.0f ms", o.PingAtStart)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", o.StartedAt.Local().Format("Jan 2 15:04"), lasted, causeLabel(o.Cause), wifi, ping)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", o.StartedAt.Local().Format("Jan 2 15:04"), lasted, outageLabel(o.Cause, o.Planned), wifi, ping)
 	}
 	if err := w.Flush(); err != nil {
 		return err

@@ -194,7 +194,10 @@ func (e *env) run(cmd string, args []string) error {
 		if err := needArgs(args, 1, "an app, and optionally a node: asdl-hub move <app>... [node]"); err != nil {
 			return err
 		}
-		apps, to := splitMoveArgs(c, args)
+		apps, to, err := splitMoveArgs(c, args)
+		if err != nil {
+			return err
+		}
 		if len(apps) == 1 {
 			return e.move(c, apps[0], to)
 		}
@@ -387,15 +390,23 @@ func (e *env) paint(code, s string) string {
 	return "\x1b[" + code + "m" + s + "\x1b[0m"
 }
 
-// splitMoveArgs reads `move <app>... [node]`: the last word is the target when it names a node, otherwise every
-// word is an app and each goes to its best node.
-func splitMoveArgs(c *client, args []string) (apps []string, to string) {
-	if len(args) == 1 {
-		return args, ""
+// splitMoveArgs reads `move <app>... [node]`: the last word is the target when it names a node, or one more app
+// when it names an app (each then goes to its best node). A word that is neither is a typo, and nothing moves:
+// guessing would move apps to a node nobody asked for. Every app must exist before any move starts.
+func splitMoveArgs(c *client, args []string) (apps []string, to string, err error) {
+	apps = args
+	if len(args) > 1 {
+		last := args[len(args)-1]
+		if _, nodeErr := c.findNode(last); nodeErr == nil {
+			apps, to = args[:len(args)-1], last
+		} else if _, appErr := c.findApp(last); appErr != nil {
+			return nil, "", fmt.Errorf("%q is neither a node nor an app: %v", last, nodeErr)
+		}
 	}
-	last := args[len(args)-1]
-	if _, err := c.findNode(last); err == nil {
-		return args[:len(args)-1], last
+	for _, a := range apps {
+		if _, err := c.findApp(a); err != nil {
+			return nil, "", err
+		}
 	}
-	return args, ""
+	return apps, to, nil
 }

@@ -84,7 +84,7 @@ func fixedPortClash(db *gorm.DB, node *models.Node, project *models.Project) int
 type placementCandidate struct {
 	Node         models.Node
 	Uptime7d     float64 // 0-100; negative when the node has no uptime record yet
-	OutagesToday int     // outages that began in the last 24 hours
+	OutagesToday int     // unplanned outages in the last 24 hours
 	IsMaster     bool
 }
 
@@ -160,7 +160,8 @@ func placementCandidates(db *gorm.DB, project *models.Project, excluded []string
 			c.Uptime7d = *u.Uptime7d
 		}
 		var today int64
-		db.Model(&models.NodeOutage{}).Where("node_id = ? AND (ended_at IS NULL OR ended_at > ?)", nodes[i].ID, dayAgo).Count(&today)
+		// Planned stops (someone stopped the agent, a clean shutdown) don't make a node unreliable.
+		db.Model(&models.NodeOutage{}).Where("node_id = ? AND NOT planned AND (ended_at IS NULL OR ended_at > ?)", nodes[i].ID, dayAgo).Count(&today)
 		c.OutagesToday = int(today)
 		cands = append(cands, c)
 	}

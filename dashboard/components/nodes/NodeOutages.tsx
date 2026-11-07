@@ -101,6 +101,14 @@ export function NodeOutages({ nodeId }: { nodeId: string }) {
             <div key={o.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
               <div className="text-text-primary">
                 {when(o.started_at)} <span className="text-text-muted">to</span> {o.ended_at ? when(o.ended_at) : 'now'}
+                {o.planned && (
+                  <span
+                    className="ml-2 text-xs text-text-muted"
+                    title="The agent said it was stopping on purpose just before. This doesn't count against the node when apps are placed."
+                  >
+                    planned
+                  </span>
+                )}
                 {o.cause && CAUSES[o.cause] && (
                   <span className="ml-2 text-xs text-text-muted" title={CAUSES[o.cause].hint}>
                     {CAUSES[o.cause].label}
