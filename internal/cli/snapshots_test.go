@@ -83,7 +83,7 @@ func TestSnapshotOn_SetsTheThreeSettingsAndOffKeepsTheData(t *testing.T) {
 	calls := snapshotServer(t, []map[string]interface{}{redisPlugin(false, false, false)})
 	c, _ := newClient()
 	var out bytes.Buffer
-	e := &env{out: &out}
+	e := &env{out: &out, yes: true}
 	if err := e.snapshotCommand(c, []string{"on", "chat", "--minutes", "10"}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSnapshotNowRestoreDelete(t *testing.T) {
 	calls := snapshotServer(t, []map[string]interface{}{redisPlugin(true, true, true)})
 	c, _ := newClient()
 	var out bytes.Buffer
-	e := &env{out: &out}
+	e := &env{out: &out, yes: true}
 	if err := e.snapshotCommand(c, []string{"now", "chat"}); err != nil || !strings.Contains(out.String(), "queued") {
 		t.Fatalf("now: %v %s", err, out.String())
 	}

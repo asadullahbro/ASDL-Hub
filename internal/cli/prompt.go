@@ -13,7 +13,8 @@ import (
 
 var stdin = bufio.NewReader(os.Stdin)
 
-func interactive() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+// interactive reports whether a person is at a terminal to answer questions (a variable so tests can stand in).
+var interactive = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // ask reads one line from the person at the terminal.
 func (e *env) ask(question string) (string, error) {
@@ -52,16 +53,31 @@ func (e *env) askValue(key string, secret bool) (string, error) {
 	return string(b), nil
 }
 
+// confirm asks a yes/no question before something that changes things (a move, a redeploy, a restore). At a
+// terminal, Enter means yes. Without one (a script, a pipe, cron) it never assumes yes: an answer piped in is
+// read ("n" means no, and only "y" or "yes" means yes), and with none it refuses and points at --yes. It once
+// said yes whenever there was no terminal, so `echo n | asdl-hub move app` moved the app.
 func (e *env) confirm(question string) bool {
-	if !interactive() {
+	if e.yes {
+		fmt.Fprintln(e.out, question+" yes (--yes)")
 		return true
 	}
-	a, err := e.ask(question + " [Y/n] ")
+	if interactive() {
+		a, err := e.ask(question + " [Y/n] ")
+		if err != nil {
+			return false
+		}
+		a = strings.ToLower(a)
+		return a == "" || a == "y" || a == "yes"
+	}
+	a, err := e.ask(question + " [y/N] ")
 	if err != nil {
+		fmt.Fprintln(e.out, "\nNo terminal to ask at, so nothing was done. Add --yes to go ahead without asking.")
 		return false
 	}
+	fmt.Fprintln(e.out, a)
 	a = strings.ToLower(a)
-	return a == "" || a == "y" || a == "yes"
+	return a == "y" || a == "yes"
 }
 
 // askChanges turns arguments into changes, asking for whatever is missing:

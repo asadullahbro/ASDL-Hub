@@ -77,7 +77,8 @@ Hub
   version                     This program's version
   serve                       Run the Hub server (what the service runs)
 
-Apps and nodes are named by name or ID. Add --json to print the API's answer.
+Apps and nodes are named by name or ID. Add --json to print the API's answer,
+and --yes (-y) to answer "are you sure?" questions with yes (needed without a terminal).
 On the Hub's server, run commands with sudo; elsewhere, log in first.
 Docs: https://docs.asdl.website/hub/cli/
 `
@@ -87,6 +88,8 @@ type env struct {
 	version string
 	json    bool
 	color   bool
+	// yes answers every "are you sure?" with yes (--yes or -y), for scripts.
+	yes bool
 }
 
 // IsCommand reports whether args ask for a CLI command rather than the server.
@@ -107,6 +110,10 @@ func Run(args []string, version string) int {
 	for _, a := range args {
 		if a == "--json" {
 			e.json = true
+			continue
+		}
+		if a == "--yes" || a == "-y" {
+			e.yes = true
 			continue
 		}
 		rest = append(rest, a)
@@ -235,7 +242,7 @@ func (e *env) run(cmd string, args []string) error {
 		if len(args) < 2 || args[0] != "remove" {
 			return usageError{"expected asdl-hub node set <node> parallel-jobs=N|auto, or node remove <node> [--yes]"}
 		}
-		yes := false
+		yes := e.yes
 		var name string
 		for _, a := range args[1:] {
 			if a == "--yes" || a == "-y" {

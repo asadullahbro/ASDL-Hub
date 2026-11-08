@@ -41,7 +41,7 @@ func TestRollback_ShowsBothVersionsAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := (&env{out: &out}).rollback(c, "bot"); err != nil {
+	if err := (&env{out: &out, yes: true}).rollback(c, "bot"); err != nil {
 		t.Fatal(err)
 	}
 	if !*posted {

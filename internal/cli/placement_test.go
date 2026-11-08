@@ -49,7 +49,7 @@ func TestMove_WithoutANodeUsesTheBestMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := (&env{out: &out}).move(c, "mailcow", ""); err != nil {
+	if err := (&env{out: &out, yes: true}).move(c, "mailcow", ""); err != nil {
 		t.Fatal(err)
 	}
 	if (*posted)["target_node_id"] != "n-tower" || (*posted)["project_id"] != "p1" {

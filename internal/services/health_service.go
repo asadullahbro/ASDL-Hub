@@ -118,6 +118,25 @@ func (s *HealthService) deployInProgress(project *models.Project) bool {
 	return dep.Status == models.DeploymentStatusPending || dep.Status == models.DeploymentStatusRunning
 }
 
+// redeployLimit is how long a deploy on an app's own node may keep its health checks from counting. A deploy
+// that takes longer is treated as stuck, and the app's checks count again.
+const redeployLimit = 10 * time.Minute
+
+// redeployingInPlace reports whether project's latest deploy is underway on the node it already runs on, that
+// node is online, and the deploy is recent. Only then is not answering expected: a deploy queued for a node that
+// went offline would otherwise hold off failover for as long as that node stays down.
+func (s *HealthService) redeployingInPlace(project *models.Project, node *models.Node, now time.Time) bool {
+	if project.DeploymentID == "" || node == nil || !node.Online {
+		return false
+	}
+	var dep models.Deployment
+	if s.db.First(&dep, "id = ?", project.DeploymentID).Error != nil {
+		return false
+	}
+	underway := dep.Status == models.DeploymentStatusPending || dep.Status == models.DeploymentStatusRunning
+	return underway && dep.NodeID == project.NodeID && now.Sub(dep.CreatedAt) < redeployLimit
+}
+
 // agentReportFresh is how recent the node's last heartbeat must be to trust the container list it carried.
 // Agents beat every 30s.
 const agentReportFresh = 60 * time.Second
@@ -334,6 +353,17 @@ func (s *HealthService) checkAllProjects() {
 				closeAppOutage(s.db, project.ID, time.Now())
 				notify(s.recoveredEvent(&project, since, true, false))
 			}
+			continue
+		}
+
+		// Being redeployed on its own node right now (a CI deploy swapping the container): not answering is
+		// expected. Failing it over here once replaced a deploy that was about to succeed with a slow move to
+		// another node, and the Hub then removed the good copy.
+		if s.redeployingInPlace(&project, nodes[project.NodeID], time.Now()) {
+			if project.HealthStatus != "degraded" {
+				s.db.Model(&project).Update("health_status", "degraded")
+			}
+			log.Printf("⏳ Project %s is being redeployed on its node, not counting this check", project.Name)
 			continue
 		}
 
